@@ -19,8 +19,10 @@ env:
 jobs:
   test:
     name: test (${{ matrix.name }})
-    # Self-hosted runners execute whatever a workflow gives them, so pull
-    # requests from forks never run here.
+    # Keeps pull requests from forks off the self-hosted runners. This is
+    # not a security boundary: a fork can edit this file in its pull request.
+    # The boundary is the repository's approval setting for fork workflows
+    # (see README, "CI on self-hosted runners").
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false

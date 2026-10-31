@@ -84,7 +84,7 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
 - **No undo tool.** Godot does not give plugins the editor's own undo and redo, and calling the history's `UndoRedo` directly gets the editor's undo stack out of step, so the next Ctrl+Z undoes the wrong action. MCP edits stay in the editor's history, so the user can undo them with Ctrl+Z; an agent reverts its own change by making the opposite one.
 - **One writer per project.** Scene edits go through the open editor. Writing a `.tscn` by hand while the editor has it open loses changes on the editor's next save.
 - **Paths are portable.** The server converts every path to a `res://` path. It refuses paths that leave the project, including through `..\` (Godot reads `\` as a separator on every OS) and through symbolic links or junctions that point outside. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
-- **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running.
+- **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running. `taskkill /T` only finds children while the game itself is still running. A process the game started that outlives it is not stopped on Windows; a Job Object would cover that and is not implemented yet.
 - **Security.**
   - The plugin binds to `127.0.0.1` only. This also avoids the Windows Firewall prompt.
   - Clients must present a 32-byte random token. It is stored in `bridge.json`, inside a folder only its owner can enter on Linux and macOS (`0700`, the file itself `0600`). The file is written under a temporary name and renamed, so a server never reads half of it.
@@ -126,7 +126,10 @@ What each runner needs:
 Two safety measures:
 
 - **Leftover processes.** The end-to-end tests keep their projects in the job's temp folder. A final step ends any Godot or godot-mcp process still running there. A cancelled job would otherwise leave editors running on the machine.
-- **Fork pull requests.** Pull requests from forks never run on these runners, because a self-hosted runner executes whatever code a workflow hands it. Also turn on *Require approval for all outside collaborators* in the repository's Actions settings.
+- **Fork pull requests.** A self-hosted runner executes whatever code a workflow hands it, and a pull request can change the workflow itself. The `if:` in `ci.yml` keeps honest fork pull requests off the runners, but a fork can delete it. The real protection is outside the YAML:
+  - Keep the repository private, or set *Settings → Actions → General → Fork pull request workflows* to *Require approval for all external contributors*, and read a fork's workflow changes before approving a run.
+  - In an organization, put the runners in a runner group limited to this repository.
+  - GitHub advises against self-hosted runners for public repositories. If this one goes public, run fork pull requests on GitHub-hosted runners or on throwaway machines.
 
 ## Roadmap
 
