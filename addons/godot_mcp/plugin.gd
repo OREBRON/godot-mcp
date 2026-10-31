@@ -15,6 +15,8 @@ const MAX_REQUESTS_PER_FRAME := 32
 var _server: BridgeServer
 var _commands: Commands
 var _info_path := ""
+var _queue := [] # [peer_id, message] pairs waiting to run
+var _running := false
 
 
 func _enter_tree() -> void:
@@ -38,11 +40,24 @@ func _exit_tree() -> void:
 func _process(_delta: float) -> void:
 	if _server == null:
 		return
-	for request in _server.poll(_hello, MAX_REQUESTS_PER_FRAME):
-		_handle(request[0], request[1])
+	_queue.append_array(_server.poll(_hello, MAX_REQUESTS_PER_FRAME))
+	if not _running and not _queue.is_empty():
+		_drain()
 
 
-## Runs one request. Commands may await frames, so several run side by side.
+## Runs queued requests one after another. Commands may wait for frames, and
+## two sessions' commands running side by side could otherwise see the
+## edited scene change under them halfway (one opens a scene while the
+## other is adding a node).
+func _drain() -> void:
+	_running = true
+	while not _queue.is_empty() and _server != null:
+		var request: Array = _queue.pop_front()
+		await _handle(request[0], request[1])
+	_running = false
+
+
+## Runs one request and sends its reply.
 func _handle(peer_id: int, msg: Dictionary) -> void:
 	var params = msg.get("params", {})
 	if typeof(params) != TYPE_DICTIONARY:

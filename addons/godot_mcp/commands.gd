@@ -297,7 +297,7 @@ func _node_get(p: Dictionary) -> Dictionary:
 				var similar := _similar_properties(node, name.get_slice(":", 0))
 				return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "")
 			out[name] = Codec.encode(node.get_indexed(NodePath(name)))
-	return {"path": _rel(node), "type": node.get_class(), "properties": out}
+	return {"scene": _root().scene_file_path, "path": _rel(node), "type": node.get_class(), "properties": out}
 
 
 func _scene_open(p: Dictionary) -> Dictionary:
@@ -338,7 +338,9 @@ func _scene_create(p: Dictionary) -> Dictionary:
 	EditorInterface.open_scene_from_path(path)
 	await _frames(2)
 	var opened := _root()
-	return {"scene": path, "root": {"name": str(opened.name), "type": opened.get_class()} if opened != null else null}
+	if opened == null or opened.scene_file_path != path:
+		return _fail("OPEN_FAILED", "saved %s, but the editor did not open it" % path, "open it with scene_open")
+	return {"scene": path, "root": {"name": str(opened.name), "type": opened.get_class()}}
 
 
 func _scene_save(p: Dictionary) -> Dictionary:
@@ -456,7 +458,7 @@ func _node_add(p: Dictionary) -> Dictionary:
 	ur.add_do_reference(node)
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
-	return {"path": _rel(node), "name": str(node.name), "type": node.get_class()}
+	return {"scene": root.scene_file_path, "path": _rel(node), "name": str(node.name), "type": node.get_class()}
 
 
 func _node_set_properties(p: Dictionary) -> Dictionary:
@@ -481,7 +483,7 @@ func _node_set_properties(p: Dictionary) -> Dictionary:
 	var out := {}
 	for c in changes:
 		out[str(c[0])] = Codec.encode(node.get_indexed(c[0]))
-	return {"path": _rel(node), "properties": out}
+	return {"scene": _root().scene_file_path, "path": _rel(node), "properties": out}
 
 
 ## Collects [node, owner] for node and everything below it that has an
@@ -518,7 +520,7 @@ func _node_delete(p: Dictionary) -> Dictionary:
 	ur.add_undo_reference(node)
 	ur.commit_action()
 	var removed := owners.filter(func(pair: Array) -> bool: return pair[1] == root).size()
-	return {"deleted": path, "nodes_removed": removed}
+	return {"scene": root.scene_file_path, "deleted": path, "nodes_removed": removed}
 
 
 func _editor_screenshot(p: Dictionary) -> Dictionary:
