@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/orebron/godot-mcp/internal/project"
 	"github.com/orebron/godot-mcp/internal/server"
@@ -47,7 +48,11 @@ func main() {
 			slog.Warn("no Godot project yet; tools will report it", "err", err)
 		}
 		s := server.New(server.Options{ProjectDir: dir, ProjectErr: err, GodotPath: *godotFlag})
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		// Clients and supervisors stop servers with SIGTERM as often as with
+		// Ctrl+C. Both must reach the normal shutdown, which ends the game:
+		// it runs in its own process group and would outlive the server.
+		// (Windows delivers neither; there the client closes stdin.)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		if err := s.Run(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("server stopped", "err", err)
