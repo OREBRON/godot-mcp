@@ -86,16 +86,22 @@ func _data_dir() -> String:
 func _write_info() -> void:
 	var dir := ProjectSettings.globalize_path(_data_dir() + "/godot_mcp")
 	DirAccess.make_dir_recursive_absolute(dir)
+	var windows := OS.get_name() == "Windows"
+	if not windows:
+		# Only the owner may enter the folder, so no other user can open
+		# bridge.json, not even before the file's own permissions are set.
+		# On Windows the folder keeps the project folder's permissions.
+		var err := FileAccess.set_unix_permissions(dir, FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER | FileAccess.UNIX_EXECUTE_OWNER)
+		if err != OK:
+			push_warning("Godot MCP: could not make %s private (%s); other users of this computer may be able to read the bridge token." % [dir, error_string(err)])
 	_info_path = dir.path_join("bridge.json")
-	# Create the file and restrict it before the token goes in.
-	var f := FileAccess.open(_info_path, FileAccess.WRITE)
+	# Write a temporary file and rename it, so that a server never reads a
+	# half-written one.
+	var tmp := _info_path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
-		push_error("Godot MCP: cannot write %s: %s" % [_info_path, error_string(FileAccess.get_open_error())])
+		push_error("Godot MCP: cannot write %s: %s" % [tmp, error_string(FileAccess.get_open_error())])
 		return
-	f.close()
-	if OS.get_name() != "Windows":
-		FileAccess.set_unix_permissions(_info_path, FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER)
-	f = FileAccess.open(_info_path, FileAccess.WRITE)
 	f.store_string(JSON.stringify({
 		"protocol": BridgeServer.PROTOCOL,
 		"port": _server.port,
@@ -106,6 +112,13 @@ func _write_info() -> void:
 		"project_path": ProjectSettings.globalize_path("res://"),
 	}, "  "))
 	f.close()
+	if not windows:
+		FileAccess.set_unix_permissions(tmp, FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER)
+	elif FileAccess.file_exists(_info_path):
+		DirAccess.remove_absolute(_info_path) # a rename does not replace a file on Windows
+	var err := DirAccess.rename_absolute(tmp, _info_path)
+	if err != OK:
+		push_error("Godot MCP: cannot write %s: %s" % [_info_path, error_string(err)])
 
 
 func _remove_info() -> void:

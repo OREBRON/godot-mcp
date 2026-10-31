@@ -122,7 +122,8 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 	if len(scripts) == 0 {
 		return CheckResult{OK: true, Notes: []string{"no .gd files to check"}}, nil
 	}
-	if err := os.MkdirAll(p.MCPDir(), 0o755); err != nil {
+	// Private like the plugin keeps it: bridge.json, with the token, lives here.
+	if err := os.MkdirAll(p.MCPDir(), 0o700); err != nil {
 		return CheckResult{}, err
 	}
 	// Each run gets its own folder: several agent sessions may check

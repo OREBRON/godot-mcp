@@ -87,8 +87,9 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
 - **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running.
 - **Security.**
   - The plugin binds to `127.0.0.1` only. This also avoids the Windows Firewall prompt.
-  - Clients must present a 32-byte random token. It is stored in `bridge.json`, which is readable only by its owner on POSIX systems.
+  - Clients must present a 32-byte random token. It is stored in `bridge.json`, inside a folder only its owner can enter on Linux and macOS (`0700`, the file itself `0600`). The file is written under a temporary name and renamed, so a server never reads half of it.
   - The token protects against other users on the same machine, not against other programs running as the same user.
+  - On Windows the folder keeps the permissions of the project folder. A project under your user profile is private to you; a project in a shared place such as `C:\Projects` may be readable by other local accounts.
 
 ## Development
 
