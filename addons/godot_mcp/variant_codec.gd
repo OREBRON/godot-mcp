@@ -77,9 +77,13 @@ static func decode(value: Variant, type: int, current: Variant) -> Dictionary:
 				if value.is_empty():
 					return {"value": null}
 				if value.begins_with("res://") or value.begins_with("uid://"):
-					if not ResourceLoader.exists(value):
+					var path := to_res_path(value)
+					var problem := check_res_path(path)
+					if not problem.is_empty():
+						return {"error": problem}
+					if not ResourceLoader.exists(path):
 						return {"error": "%s does not exist" % value}
-					var res := load(value)
+					var res := load(path)
 					if res == null:
 						return {"error": "%s could not be loaded; check it with script_check if it is a script" % value}
 					return {"value": res}
@@ -111,6 +115,43 @@ static func decode(value: Variant, type: int, current: Variant) -> Dictionary:
 			return {"value": converted}
 	var example: String = var_to_str(current) if current != null else type_string(type) + "(...)"
 	return {"error": "expected %s, e.g. %s; got %s" % [type_string(type), example, JSON.stringify(value)]}
+
+
+## Turns a uid:// or res:// reference into a clean res:// path; "\\" counts as
+## a separator, as it does everywhere in Godot.
+static func to_res_path(value: String) -> String:
+	if value.begins_with("uid://"):
+		var id := ResourceUID.text_to_id(value)
+		if ResourceUID.has_id(id):
+			return ResourceUID.get_id_path(id)
+		return value
+	return value.replace("\\", "/").simplify_path()
+
+
+## Returns why a res:// path may not be used, or "" when it is fine. The
+## server checks the paths it can see; these come inside property values.
+## ".." can leave the project, and macOS and Windows accept a wrongly cased
+## path that then breaks on Linux and in exported games.
+static func check_res_path(path: String) -> String:
+	if not path.begins_with("res://"):
+		return "%s is not a res:// path" % path
+	var parts := path.trim_prefix("res://").split("/", false)
+	if parts.has(".."):
+		return "%s leaves the project folder" % path
+	var dir := "res://"
+	for part in parts:
+		var d := DirAccess.open(dir)
+		if d == null:
+			return ""
+		d.include_hidden = true
+		var names := Array(d.get_directories()) + Array(d.get_files())
+		if not names.has(part):
+			for n in names:
+				if n.to_lower() == part.to_lower():
+					return "%s has the wrong letter case: on disk it is spelled \"%s\"; Linux and exported games are case-sensitive" % [path, n]
+			return "" # missing; the loader reports that
+		dir = dir.path_join(part)
+	return ""
 
 
 static func _color(value: Variant) -> Variant:

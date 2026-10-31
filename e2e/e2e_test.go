@@ -197,6 +197,12 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"position": map[string]any{"x": 5, "y": 6}, "visible": false}})
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"positon": []any{1, 2}}}, "position")
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"position": "left"}}, "INVALID_VALUE")
+	// Paths inside property values get the same checks as tool paths.
+	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": "res://../outside.png"}}, "leaves the project")
+	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": `res://demo\..\..\outside.png`}}, "leaves the project")
+	if runtime.GOOS != "linux" {
+		fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"script": "res://Demo/main.gd"}}, "letter case")
+	}
 
 	got := ok("node_get", map[string]any{"node_path": "Hero"})
 	props := got["properties"].(map[string]any)
