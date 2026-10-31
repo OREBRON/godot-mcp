@@ -105,14 +105,27 @@ Pushing a `v*` tag builds the six binaries with GoReleaser and attaches them, al
 
 ### CI on self-hosted runners
 
-[`ci.yml`](.github/workflows/ci.yml) runs vet, the unit tests and the end-to-end tests with Godot 4.7.2 on four self-hosted runners. It selects them by the labels GitHub gives every self-hosted runner by default:
+[`ci.yml`](.github/workflows/ci.yml) runs vet, the unit tests and the end-to-end tests with Godot 4.7.2 on self-hosted runners. It selects them by the labels GitHub gives every self-hosted runner by default:
 
 | Target | `runs-on` labels |
 |---|---|
+| Linux amd64 | `self-hosted`, `Linux`, `X64` (also runs the GoReleaser cross-build) |
 | macOS arm64 | `self-hosted`, `macOS`, `ARM64` |
 | macOS amd64 | `self-hosted`, `macOS`, `X64` |
-| Linux amd64 | `self-hosted`, `Linux`, `X64` (also runs the GoReleaser cross-build) |
 | Windows amd64 | `self-hosted`, `Windows`, `X64` |
+
+The tests run on Linux amd64 only by default. A job whose labels match no runner waits in the queue for a day before it fails, so a target is tested only once it has a runner. To choose the targets, set the repository variable `CI_TEST_RUNNERS` (*Settings → Secrets and variables → Actions → Variables*) to a JSON list of them. All four:
+
+```json
+[
+  {"name": "Linux amd64",   "runner": ["self-hosted", "Linux", "X64"]},
+  {"name": "macOS arm64",   "runner": ["self-hosted", "macOS", "ARM64"]},
+  {"name": "macOS amd64",   "runner": ["self-hosted", "macOS", "X64"]},
+  {"name": "Windows amd64", "runner": ["self-hosted", "Windows", "X64"]}
+]
+```
+
+`name` appears in the job name and `runner` holds the labels, so a runner with labels of its own works too. The list must not be empty; delete the variable to go back to Linux only. The cross-build always runs on the Linux runner.
 
 What each runner needs:
 

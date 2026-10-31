@@ -27,15 +27,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macOS arm64
-            runner: [self-hosted, macOS, ARM64]
-          - name: macOS amd64
-            runner: [self-hosted, macOS, X64]
-          - name: Linux amd64
-            runner: [self-hosted, Linux, X64]
-          - name: Windows amd64
-            runner: [self-hosted, Windows, X64]
+        # Linux amd64 only, unless the repository variable CI_TEST_RUNNERS
+        # lists the targets to test as {"name", "runner"} entries. A job
+        # whose labels match no runner waits in the queue for a day, so a
+        # target is listed only while it has a runner. The README section
+        # "CI on self-hosted runners" has the entries for macOS and Windows.
+        include: ${{ fromJSON(vars.CI_TEST_RUNNERS || '[{"name":"Linux amd64","runner":["self-hosted","Linux","X64"]}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
