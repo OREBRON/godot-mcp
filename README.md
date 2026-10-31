@@ -129,6 +129,7 @@ The tests run on Linux amd64 only by default. A job whose labels match no runner
 
 What each runner needs:
 
+- **Access to this repository.** The repository is public. An organization runner serves it only if the runner's group has *Allow public repositories* checked (*Organization settings → Actions → Runner groups*). The box is off by default, and the `Default` group then shows *All repositories, excluding public repositories*. Without it, every job stays queued.
 - **Git and internet access.** `actions/setup-go` downloads Go itself.
 - **Linux and macOS:** `curl` and `unzip`.
 - **Windows:** Windows PowerShell, which every Windows install has.
@@ -140,9 +141,9 @@ Two safety measures:
 
 - **Leftover processes.** The end-to-end tests keep their projects in the job's temp folder. A final step ends any Godot or godot-mcp process still running there. A cancelled job would otherwise leave editors running on the machine.
 - **Fork pull requests.** A self-hosted runner executes whatever code a workflow hands it, and a pull request can change the workflow itself. The `if:` in `ci.yml` keeps honest fork pull requests off the runners, but a fork can delete it. The real protection is outside the YAML:
-  - Keep the repository private, or set *Settings → Actions → General → Fork pull request workflows* to *Require approval for all external contributors*, and read a fork's workflow changes before approving a run.
-  - In an organization, put the runners in a runner group limited to this repository.
-  - GitHub advises against self-hosted runners for public repositories. If this one goes public, run fork pull requests on GitHub-hosted runners or on throwaway machines.
+  - Keep *Settings → Actions → General → Fork pull request workflows* at *Require approval for all external contributors*, and read a fork's workflow changes before approving a run.
+  - Give the runners for this repository a group of their own: *Selected repositories* with only this repository, and *Allow public repositories* checked. Checking that box on the `Default` group instead opens every runner in it to a public repository.
+  - GitHub advises against self-hosted runners for public repositories. Use machines that hold nothing else of value, or run fork pull requests on GitHub-hosted runners.
 
 ## Roadmap
 
