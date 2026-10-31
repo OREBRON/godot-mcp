@@ -182,6 +182,13 @@ func TestEndToEnd(t *testing.T) {
 	fails("node_add", map[string]any{"type": "Sprit2D"}, "Sprite2D")
 	fails("node_add", map[string]any{"type": "Resource"}, "INVALID_TYPE")
 	fails("node_add", map[string]any{"parent_path": "Nope/Deeper", "type": "Node"}, "NODE_NOT_FOUND")
+	// ".." must not reach the editor's own nodes above the scene root.
+	fails("node_delete", map[string]any{"node_path": ".."}, "INVALID_PATH")
+	fails("node_get", map[string]any{"node_path": "Player/../.."}, "INVALID_PATH")
+	fails("node_set_properties", map[string]any{"node_path": "../..", "properties": map[string]any{"name": "x"}}, "INVALID_PATH")
+	if text, _ := s.call("node_get", map[string]any{"node_path": "../Nope"}); strings.Contains(text, "@") {
+		t.Errorf("error for a path above the root names editor nodes: %s", text)
+	}
 	if runtime.GOOS != "linux" { // Linux would not find the file at all
 		fails("node_add", map[string]any{"scene": "res://Demo/Player.tscn"}, "letter case")
 		fails("scene_open", map[string]any{"path": "res://demo/MAIN.tscn"}, "letter case")

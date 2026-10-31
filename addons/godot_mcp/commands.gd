@@ -77,6 +77,12 @@ func _owned_children(node: Node) -> Array:
 	return node.get_children().filter(func(c: Node) -> bool: return c.owner == root)
 
 
+## Whether node is the edited scene's root or below it.
+func _inside(node: Node) -> bool:
+	var root := _root()
+	return node == root or root.is_ancestor_of(node)
+
+
 ## Returns the node at a path relative to the scene root, or an error that
 ## lists what does exist there.
 func _resolve(path: String) -> Variant:
@@ -90,11 +96,15 @@ func _resolve(path: String) -> Variant:
 		return _fail("INVALID_PATH", "node paths are relative to the scene root, got \"%s\"" % p, "use \".\" for the root and e.g. \"Player/Sprite2D\" for a child")
 	var node := root.get_node_or_null(NodePath(p))
 	if node != null:
+		# ".." would otherwise climb into the editor's own nodes, which hold
+		# the edited scene.
+		if not _inside(node):
+			return _fail("INVALID_PATH", "\"%s\" leads outside the edited scene" % p, "node paths start at the scene root and cannot go above it with \"..\"")
 		return node
 	var cur := root
 	for part in p.split("/"):
 		var next := cur.get_node_or_null(NodePath(part))
-		if next == null:
+		if next == null or not _inside(next):
 			break
 		cur = next
 	var kids := _owned_children(cur).map(func(c: Node) -> String: return str(c.name))
