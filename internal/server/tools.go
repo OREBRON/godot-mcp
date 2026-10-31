@@ -322,7 +322,8 @@ func addEditorTool[In any](s *Server, t *mcp.Tool, command string, timeout time.
 	})
 }
 
-// normalizePaths turns the named path parameters into clean res:// paths.
+// normalizePaths turns the named path parameters into clean res:// paths and
+// checks the letter case of the parts that already exist.
 func (s *Server) normalizePaths(params map[string]any, keys []string) error {
 	p, err := s.project()
 	if err != nil {
@@ -336,6 +337,11 @@ func (s *Server) normalizePaths(params map[string]any, keys []string) error {
 		res, err := p.ToRes(v)
 		if err != nil {
 			return fmt.Errorf("%s: %w", k, err)
+		}
+		if !strings.HasPrefix(res, "uid://") {
+			if err := p.CheckCaseExisting(res); err != nil {
+				return fmt.Errorf("%s: %w", k, err)
+			}
 		}
 		params[k] = res
 	}

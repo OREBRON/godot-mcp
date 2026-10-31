@@ -203,6 +203,16 @@ func (p *Project) ToOS(res string) (string, error) {
 // exported .pck files do not, so a wrong-cased path is a bug that only shows
 // up later on another machine.
 func (p *Project) CheckCase(res string) error {
+	return p.checkCase(res, true)
+}
+
+// CheckCaseExisting is CheckCase for a path that may not exist yet, such as
+// a scene about to be created: it checks the folders and file that do exist.
+func (p *Project) CheckCaseExisting(res string) error {
+	return p.checkCase(res, false)
+}
+
+func (p *Project) checkCase(res string, mustExist bool) error {
 	r, err := p.ToRes(res)
 	if err != nil {
 		return err
@@ -213,6 +223,9 @@ func (p *Project) CheckCase(res string) error {
 			continue
 		}
 		entries, err := os.ReadDir(cur)
+		if errors.Is(err, os.ErrNotExist) && !mustExist {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -227,6 +240,9 @@ func (p *Project) CheckCase(res string) error {
 			}
 		}
 		if found == "" {
+			if !mustExist {
+				return nil
+			}
 			return fmt.Errorf("%s does not exist", r)
 		}
 		if found != part {

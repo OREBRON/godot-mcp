@@ -168,6 +168,10 @@ func TestEndToEnd(t *testing.T) {
 	fails("node_add", map[string]any{"type": "Sprit2D"}, "Sprite2D")
 	fails("node_add", map[string]any{"type": "Resource"}, "INVALID_TYPE")
 	fails("node_add", map[string]any{"parent_path": "Nope/Deeper", "type": "Node"}, "NODE_NOT_FOUND")
+	if runtime.GOOS != "linux" { // Linux would not find the file at all
+		fails("node_add", map[string]any{"scene": "res://Demo/Player.tscn"}, "letter case")
+		fails("scene_open", map[string]any{"path": "res://demo/MAIN.tscn"}, "letter case")
+	}
 
 	ok("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"position": map[string]any{"x": 5, "y": 6}, "visible": false}})
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"positon": []any{1, 2}}}, "position")

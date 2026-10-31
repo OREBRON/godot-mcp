@@ -118,4 +118,15 @@ func TestCheckCase(t *testing.T) {
 	if err := p.CheckCase("res://Scenes/Nope.tscn"); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("missing file: %v", err)
 	}
+
+	// A new file may not exist yet, but the folders above it must be spelled right.
+	if err := p.CheckCaseExisting("res://Scenes/New/level.tscn"); err != nil {
+		t.Errorf("new file in existing folder: %v", err)
+	}
+	if err := p.CheckCaseExisting("res://scenes/level.tscn"); err == nil || !strings.Contains(err.Error(), "letter case") {
+		t.Errorf("new file in wrongly cased folder: got %v, want a letter case error", err)
+	}
+	if err := p.CheckCaseExisting("res://scenes/main.tscn"); err == nil {
+		t.Error("existing file with wrong case passed CheckCaseExisting")
+	}
 }
