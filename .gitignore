@@ -1,0 +1,13 @@
+# Godot
+.godot/
+/android/
+
+# Go build output
+/dist/
+/godot-mcp
+/godot-mcp.exe
+
+# OS
+.DS_Store
+Thumbs.db
+/build-extra/

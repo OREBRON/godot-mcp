@@ -1,0 +1,20 @@
+# Godot and Go both want LF; keep it on every OS, including Windows checkouts.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+
+# The Asset Library installs the GitHub archive of a commit. Leave everything
+# but the plugin out of it.
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.goreleaser.yaml export-ignore
+/README.md export-ignore
+/cmd export-ignore
+/internal export-ignore
+/e2e export-ignore
+/demo export-ignore
+/project.godot export-ignore
+/go.mod export-ignore
+/go.sum export-ignore
