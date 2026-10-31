@@ -269,6 +269,16 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("script_check left files behind: %v", entries)
 	}
 
+	// Godot hands back a script object even when parsing fails, so the error
+	// must be tied to the file even when its name has parentheses.
+	write(t, filepath.Join(proj, "scripts", "enemy (copy).gd"), "extends Node\n\nfunc _ready() -> void:\n\tundefined_call()\n")
+	odd := ok("script_check", map[string]any{"paths": []any{"scripts/enemy (copy).gd"}})
+	oddJSON, _ := json.Marshal(odd)
+	if odd["ok"] != false || !strings.Contains(string(oddJSON), `"file":"res://scripts/enemy (copy).gd"`) {
+		t.Errorf("broken script with parentheses in its name: %s", oddJSON)
+	}
+	os.Remove(filepath.Join(proj, "scripts", "enemy (copy).gd"))
+
 	if runtime.GOOS != "linux" {
 		fails("script_check", map[string]any{"paths": []any{"Scripts/user.gd"}}, "letter case")
 	}

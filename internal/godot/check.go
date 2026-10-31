@@ -190,20 +190,29 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 		}
 	}
 
+	// Godot returns a script object even when parsing failed, so "loaded"
+	// alone proves nothing: every error must be accounted for, and one that
+	// cannot be tied to a checked file fails the check instead of vanishing.
 	byFile := map[string][]Issue{}
+	failedLoad := map[string]Issue{}
 	var other []Issue
+	runnerDir := strings.TrimSuffix(runnerRes, "check_scripts.gd")
 	for _, is := range ParseIssues(lines) {
-		if is.Severity != "error" {
-			continue
-		}
-		// "Failed to load script" repeats what the parse errors already said.
-		if strings.HasPrefix(is.Message, "Failed to load script") {
-			continue
-		}
-		if listed[is.File] {
+		switch {
+		case is.Severity != "error" || strings.HasPrefix(is.File, runnerDir):
+		case strings.HasPrefix(is.Message, "Failed to load script") && listed[is.File]:
+			// Usually repeats the parse errors above it; kept for files that
+			// got no other error.
+			failedLoad[is.File] = is
+		case listed[is.File]:
 			byFile[is.File] = append(byFile[is.File], is)
-		} else if is.File != "" && !strings.HasPrefix(is.File, runnerRes) {
+		default:
 			other = append(other, is)
+		}
+	}
+	for file, is := range failedLoad {
+		if len(byFile[file]) == 0 {
+			byFile[file] = []Issue{is}
 		}
 	}
 

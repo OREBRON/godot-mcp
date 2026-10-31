@@ -38,6 +38,30 @@ func TestParseIssues(t *testing.T) {
 	}
 }
 
+// File names may contain parentheses, colons and dots; the location still
+// has to be found.
+func TestParseIssuesOddFileNames(t *testing.T) {
+	got := ParseIssues([]string{
+		`SCRIPT ERROR: Parse Error: Unexpected "Indent".`,
+		`          at: GDScript::reload (res://scripts/player (copy):v2.gd:3)`,
+		`ERROR: Failed loading resource: res://levels/boss(1).tscn.`,
+		`   at: _load (core/io/resource_loader.cpp:317)`,
+		`ERROR: Cannot open file (res://a.gd).`,
+	})
+	if len(got) != 3 {
+		t.Fatalf("got %d issues: %+v", len(got), got)
+	}
+	if got[0].File != "res://scripts/player (copy):v2.gd" || got[0].Line != 3 {
+		t.Errorf("parenthesised name: %+v", got[0])
+	}
+	if got[1].File != "res://levels/boss(1).tscn" {
+		t.Errorf("path followed by a full stop: %+v", got[1])
+	}
+	if got[2].File != "res://a.gd" {
+		t.Errorf("path inside parentheses: %+v", got[2])
+	}
+}
+
 func TestParseVersion(t *testing.T) {
 	for in, want := range map[string]Version{
 		"4.7.2.stable.official.ed1daf0bf\n":                    {Raw: "4.7.2.stable.official.ed1daf0bf", Major: 4, Minor: 7, Patch: 2},
