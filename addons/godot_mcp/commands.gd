@@ -349,22 +349,59 @@ func _scene_save(p: Dictionary) -> Dictionary:
 	if target.is_empty():
 		if root.scene_file_path.is_empty():
 			return _fail("NO_PATH", "the scene has never been saved", "pass path, e.g. \"res://scenes/level.tscn\"")
-		if DisplayServer.get_name() == "headless":
-			# save_scene() renders a thumbnail, which a headless editor cannot.
-			EditorInterface.save_scene_as(root.scene_file_path, false)
-		else:
-			var err := EditorInterface.save_scene()
-			if err != OK:
-				return _fail("SAVE_FAILED", "saving failed: %s" % error_string(err))
-		return {"saved": root.scene_file_path}
-	if not target.ends_with(".tscn") and not target.ends_with(".scn"):
+		target = root.scene_file_path
+	elif not target.ends_with(".tscn") and not target.ends_with(".scn"):
 		return _fail("INVALID_PARAMS", "path must end with .tscn or .scn")
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(target.get_base_dir()))
-	EditorInterface.save_scene_as(target, false)
+	else:
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(target.get_base_dir()))
+	# Neither save call reports a failed write (save_scene() returns OK
+	# regardless), so check that the file can be written before saving and
+	# that it was written afterwards.
+	var blocked := _unwritable(target)
+	if not blocked.is_empty():
+		return _fail("SAVE_FAILED", blocked, "make the file and its folder writable, or save under another path")
+	var since := int(Time.get_unix_time_from_system())
+	var headless := DisplayServer.get_name() == "headless"
+	if target == root.scene_file_path and not headless:
+		EditorInterface.save_scene()
+	else:
+		# A headless editor cannot render the thumbnail that a save makes.
+		EditorInterface.save_scene_as(target, not headless)
 	await _frames(1)
-	if not FileAccess.file_exists(target):
-		return _fail("SAVE_FAILED", "the editor did not write %s" % target)
+	var problem := _check_saved(target, root, since)
+	if not problem.is_empty():
+		return _fail("SAVE_FAILED", problem, "check that the folder is writable and the disk is not full; the editor's Output panel has details")
 	return {"saved": target}
+
+
+## Returns why path cannot be written, or "" if it can.
+func _unwritable(path: String) -> String:
+	if FileAccess.file_exists(path):
+		var f := FileAccess.open(path, FileAccess.READ_WRITE)
+		if f == null:
+			return "%s cannot be written: %s" % [path, error_string(FileAccess.get_open_error())]
+		f.close()
+		return ""
+	# A hidden name, which the editor's file system ignores.
+	var probe := path.get_base_dir().path_join(".godot_mcp_write_test")
+	var f := FileAccess.open(probe, FileAccess.WRITE)
+	if f == null:
+		return "the folder %s cannot be written: %s" % [path.get_base_dir(), error_string(FileAccess.get_open_error())]
+	f.close()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(probe))
+	return ""
+
+
+## Returns why path does not hold a save of root made at or after since
+## (Unix seconds), or "" if it does.
+func _check_saved(path: String, root: Node, since: int) -> String:
+	if not FileAccess.file_exists(path):
+		return "the editor did not write %s" % path
+	if FileAccess.get_modified_time(path) < since:
+		return "%s was not rewritten; it still holds the previous save" % path
+	if path.ends_with(".tscn") and not FileAccess.get_file_as_string(path).contains("[node name=\"%s\"" % root.name):
+		return "%s does not contain the scene's root node %s" % [path, root.name]
+	return ""
 
 
 func _node_add(p: Dictionary) -> Dictionary:
