@@ -1,6 +1,7 @@
 package game
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -23,6 +24,21 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	fmt.Println("Godot Engine v4.7.2.stable.official - https://godotengine.org")
+	switch os.Getenv("FAKE_GODOT") {
+	case "longline":
+		// One 2 MiB line, then normal output: the runner must keep reading.
+		os.Stdout.Write(append(bytes.Repeat([]byte("x"), 2<<20), '\n'))
+		fmt.Println("after the long line")
+		os.Exit(0)
+	case "orphan":
+		// A child that inherits stdout and outlives the game.
+		child := exec.Command(os.Args[0])
+		child.Env = append(os.Environ(), "FAKE_GODOT=child")
+		child.Stdout = os.Stdout
+		child.Start()
+		fmt.Println("CHILD_PID", child.Process.Pid)
+		os.Exit(7)
+	}
 	fmt.Println("args:", strings.Join(os.Args[1:], " "))
 	fmt.Fprintln(os.Stderr, "SCRIPT ERROR: Invalid call. Nonexistent function 'jump'.")
 	fmt.Fprintln(os.Stderr, "          at: _ready (res://player.gd:12)")
@@ -131,4 +147,48 @@ func TestExitCodeAndCursor(t *testing.T) {
 		t.Errorf("restart after exit: %v", err)
 	}
 	r.Wait(context.Background(), 10*time.Second)
+}
+
+func TestLongLineDoesNotStopOutput(t *testing.T) {
+	r := New()
+	if err := r.Start(fake(t, "longline"), t.TempDir(), "", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait(context.Background(), 10*time.Second)
+	st := r.Status()
+	if st.Running || st.ExitCode == nil || *st.ExitCode != 0 {
+		t.Fatalf("status = %+v", st)
+	}
+	lines, _, _ := r.Output(0, 100)
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3", len(lines))
+	}
+	if long := lines[1].Text; len(long) > maxLineBytes+100 || !strings.Contains(long, "[line cut: ") {
+		t.Errorf("long line not cut: %d bytes, ends %q", len(long), long[len(long)-40:])
+	}
+	if lines[2].Text != "after the long line" {
+		t.Errorf("line after the long one = %q", lines[2].Text)
+	}
+}
+
+func TestExitWhileChildHoldsOutput(t *testing.T) {
+	r := New()
+	if err := r.Start(fake(t, "orphan"), t.TempDir(), "", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	r.Wait(context.Background(), 20*time.Second)
+	st := r.Status()
+	if st.ExitCode == nil || *st.ExitCode != 7 {
+		t.Fatalf("status after %s = %+v, want exit code 7", time.Since(start), st)
+	}
+	lines, _, _ := r.Output(0, 100)
+	for _, l := range lines {
+		var pid int
+		if _, err := fmt.Sscanf(l.Text, "CHILD_PID %d", &pid); err == nil {
+			if p, err := os.FindProcess(pid); err == nil {
+				p.Kill()
+			}
+		}
+	}
 }

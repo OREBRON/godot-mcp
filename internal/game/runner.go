@@ -4,11 +4,10 @@
 package game
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -74,14 +73,12 @@ func (r *Runner) Start(e godot.Exec, dir, scene string, headless bool, userArgs 
 	}
 	cmd := e.Command(context.Background(), args...)
 	cmd.Dir = dir
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
+	// os/exec copies the output into these writers and, through WaitDelay,
+	// stops waiting for it once the game has exited, even when a process the
+	// game started still holds the pipes open.
+	stdout := &lineWriter{r: r, cmd: cmd, stream: "stdout"}
+	stderr := &lineWriter{r: r, cmd: cmd, stream: "stderr"}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", e, err)
 	}
@@ -89,21 +86,14 @@ func (r *Runner) Start(e godot.Exec, dir, scene string, headless bool, userArgs 
 	r.exitCode, r.lines, r.total = nil, nil, 0
 	r.done = make(chan struct{})
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go r.read(stdout, "stdout", &wg)
-	go r.read(stderr, "stderr", &wg)
 	done := r.done
 	go func() {
-		wg.Wait()
-		err := cmd.Wait()
-		code := 0
-		if err != nil {
-			code = -1
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
-				code = ee.ExitCode()
-			}
+		cmd.Wait()
+		stdout.flush()
+		stderr.flush()
+		code := -1 // ended by a signal
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
 		}
 		r.mu.Lock()
 		if r.cmd == cmd {
@@ -115,19 +105,71 @@ func (r *Runner) Start(e godot.Exec, dir, scene string, headless bool, userArgs 
 	return nil
 }
 
-func (r *Runner) read(rd io.Reader, stream string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	sc := bufio.NewScanner(rd)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		text := strings.ToValidUTF8(godot.CleanLine(sc.Text()), "�")
-		r.mu.Lock()
-		r.lines = append(r.lines, Line{N: r.total, Stream: stream, Text: text})
-		r.total++
-		if len(r.lines) > maxLines {
-			r.lines = r.lines[len(r.lines)-maxLines:]
+// add stores one line of output for cmd's run.
+func (r *Runner) add(cmd *exec.Cmd, stream, text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cmd != cmd {
+		return // output of an earlier run arriving late
+	}
+	r.lines = append(r.lines, Line{N: r.total, Stream: stream, Text: text})
+	r.total++
+	if len(r.lines) > maxLines {
+		r.lines = r.lines[len(r.lines)-maxLines:]
+	}
+}
+
+// maxLineBytes caps one stored line. Longer lines are cut, but the rest is
+// still read, so the game never blocks on a full pipe.
+const maxLineBytes = 64 * 1024
+
+// lineWriter splits a stream into lines for the runner. os/exec calls Write
+// from one goroutine per stream.
+type lineWriter struct {
+	r      *Runner
+	cmd    *exec.Cmd
+	stream string
+	buf    []byte
+	cut    int // bytes dropped from the current line
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			w.take(p)
+			break
 		}
-		r.mu.Unlock()
+		w.take(p[:i])
+		w.emit()
+		p = p[i+1:]
+	}
+	return n, nil
+}
+
+func (w *lineWriter) take(b []byte) {
+	room := maxLineBytes - len(w.buf)
+	if len(b) > room {
+		w.cut += len(b) - room
+		b = b[:room]
+	}
+	w.buf = append(w.buf, b...)
+}
+
+func (w *lineWriter) emit() {
+	text := strings.ToValidUTF8(godot.CleanLine(string(w.buf)), "\uFFFD")
+	if w.cut > 0 {
+		text += fmt.Sprintf(" [line cut: %d more bytes]", w.cut)
+	}
+	w.r.add(w.cmd, w.stream, text)
+	w.buf, w.cut = w.buf[:0], 0
+}
+
+// flush emits a last line that did not end with a newline.
+func (w *lineWriter) flush() {
+	if len(w.buf) > 0 || w.cut > 0 {
+		w.emit()
 	}
 }
 
