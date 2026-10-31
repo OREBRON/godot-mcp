@@ -1,0 +1,110 @@
+# godot-mcp
+
+An MCP server that lets AI agents (Claude Code, Cursor, Codex, Claude Desktop, ...) work on a Godot 4 project. With it an agent can:
+
+- check GDScript with the project's own Godot,
+- run the game and read its errors,
+- inspect and edit the scene open in the editor. These edits go through the editor's undo history.
+
+The server is a single static binary for Linux, macOS and Windows (amd64 and arm64). Users don't need Node, Python or any other runtime.
+
+```
+MCP client (Claude Code, Cursor, ...)
+   │ stdio
+   ▼
+godot-mcp (Go binary)
+   ├── runs Godot headless itself: script_check, game_run, game_output, game_stop
+   │
+   │ WebSocket on 127.0.0.1, token from <project>/.godot/godot_mcp/bridge.json
+   ▼
+addons/godot_mcp (editor plugin, GDScript)
+   └── scene_*, node_*, editor_* tools, all undoable with Ctrl+Z
+```
+
+The plugin is the listener, so several agent sessions can share one open editor. The server spawns the game process itself and reads its stdout and stderr directly, instead of scraping the editor's Output panel.
+
+## Requirements
+
+- Godot 4.4 or newer. Development and testing use 4.7.2.
+- Nothing else on the user's machine. Go is needed only to build from source.
+
+## Setup
+
+1. **Get the binary.** Download the archive for your OS and CPU from the Releases page, or build it with `go install github.com/orebron/godot-mcp/cmd/godot-mcp@latest`.
+2. **Add the plugin to your project.** Copy `addons/godot_mcp/` into your project's `addons/` folder (the release also has it as `godot_mcp_addon_<version>.zip`). Then enable it under *Project → Project Settings → Plugins*. The Output panel shows `Godot MCP: listening on 127.0.0.1:6510`.
+3. **Configure your MCP client.** Run:
+
+   ```bash
+   godot-mcp config --project /path/to/your/project
+   ```
+
+   It prints a ready-to-paste `.mcp.json` block and a `claude mcp add` command. Both use absolute paths, which avoids the usual problems: GUI apps that don't see the shell's `PATH`, and the `cmd /c npx` workaround needed on Windows.
+
+Without the editor open, `project_info`, `script_check` and the `game_*` tools still work.
+
+### Finding Godot
+
+The server looks for Godot in this order:
+
+1. `--godot <path>`
+2. `GODOT_PATH`
+3. `PATH`: `godot`, `godot4`, `Godot`, plus `godot_console` on Windows
+4. Common install locations:
+   - macOS: `/Applications/Godot*.app`, `~/Applications`, Steam
+   - Windows: winget, Scoop, Program Files, Steam
+   - Linux: `~/.local/bin`, `/usr/local/bin`, Snap, Steam, Flatpak `org.godotengine.Godot`
+
+On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
+
+## Tools
+
+| Tool | Needs editor | What it does |
+|---|---|---|
+| `project_info` | no | Project, Godot version, editor connection and game status. Call it first. |
+| `script_check` | no | Parses `.gd` files with the real Godot, so autoloads and `class_name` globals resolve. Returns file, line and message for each failure. |
+| `game_run` | no | Runs the project or one scene, optionally headless. Returns the first output and parsed errors. |
+| `game_output` | no | Reads more output using a cursor (`next_since`). `errors_only` returns just the errors. |
+| `game_stop` | no | Stops the game and every process it started. |
+| `scene_tree` | yes | Node tree of the edited scene: names, classes, scripts and instanced scenes. |
+| `node_get` | yes | Properties of a node. By default only the ones that differ from their defaults. |
+| `scene_open` / `scene_create` / `scene_save` | yes | Opens, creates and saves scenes. |
+| `node_add` | yes | Adds a node by class (built-in or `class_name`) or instances a `.tscn`, optionally setting properties. |
+| `node_set_properties` | yes | Sets several properties in one undoable action. Accepts JSON values or Godot's text form, and `res://` paths for resources and scripts. |
+| `node_delete` | yes | Deletes a node and its children. Undoable. |
+| `editor_undo` | yes | Undo or redo in the scene history, the same as Ctrl+Z and Ctrl+Shift+Z. |
+| `editor_screenshot` | yes (windowed) | PNG of the editor's 2D or 3D viewport. |
+
+Errors carry a stable `code` plus a `hint` that says what to do next. For example, `NODE_NOT_FOUND` lists the children that do exist at that path, and `PROPERTY_NOT_FOUND` suggests properties with similar names.
+
+## Design notes
+
+- **Godot exits with 0 even when a script fails to parse.** `script_check` therefore reads the error lines Godot prints, never the exit code.
+- **New `class_name` scripts are unknown until Godot rescans the project.** `script_check` refreshes the class cache before parsing:
+  - With the editor connected, it asks the editor to rescan (the editor owns `.godot/`).
+  - Without the editor, it runs `godot --import`, and only when a `class_name` script changed.
+- **One writer per project.** Scene edits go through the open editor. Writing a `.tscn` by hand while the editor has it open loses changes on the editor's next save.
+- **Paths are portable.** The server converts every path to a `res://` path. It refuses paths outside the project. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
+- **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running.
+- **Security.**
+  - The plugin binds to `127.0.0.1` only. This also avoids the Windows Firewall prompt.
+  - Clients must present a 32-byte random token. It is stored in `bridge.json`, which is readable only by its owner on POSIX systems.
+  - The token protects against other users on the same machine, not against other programs running as the same user.
+
+## Development
+
+```bash
+go test -short ./...                                   # unit tests, no Godot needed
+go test ./e2e/                                         # real binary + headless Godot editor
+GODOT_MCP_E2E_WINDOWED=1 go test ./e2e/ -run Screenshot # opens an editor window
+```
+
+The repository root is also a Godot project (`project.godot`, `demo/`) for working on the plugin. Go folders carry `.gdignore`, so the Godot editor skips them. The `export-ignore` rules in `.gitattributes` keep everything except `addons/godot_mcp/` out of Asset Library downloads.
+
+CI runs vet, the unit tests and the end-to-end tests with Godot 4.7.2 on Ubuntu, macOS and Windows. Pushing a `v*` tag builds the six binaries with GoReleaser and attaches them, along with the plugin zip, to a GitHub release. Before tagging, update the plugin version in both `plugin.cfg` and `plugin.gd`.
+
+## Roadmap
+
+- Running-game bridge: screenshots, input injection and a live scene tree for the running game. This needs an `EditorDebuggerPlugin` in the editor and a small autoload in the game that talks over `EngineDebugger` messages.
+- An editor dock with a **Configure** button that downloads the right binary and writes the client configuration.
+- Publishing on the Godot Asset Library, Homebrew, Scoop and winget.
+- Signed and notarized binaries for macOS and Windows.
