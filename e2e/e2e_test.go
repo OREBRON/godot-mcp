@@ -3,7 +3,8 @@
 // server finds it) and is skipped when Godot is missing or with -short.
 //
 // TestEditorScreenshot opens a visible editor window, so it only runs with
-// GODOT_MCP_E2E_WINDOWED=1.
+// GODOT_MCP_E2E_WINDOWED=1. With GODOT_MCP_E2E_REQUIRED=1 a missing Godot
+// fails the tests instead of skipping them.
 package e2e
 
 import (
@@ -42,6 +43,11 @@ func start(t *testing.T, headless bool) *session {
 	}
 	g, err := godot.Locate("")
 	if err != nil {
+		// CI sets GODOT_MCP_E2E_REQUIRED so that a missing Godot fails the
+		// run instead of passing it with nothing tested.
+		if os.Getenv("GODOT_MCP_E2E_REQUIRED") == "1" {
+			t.Fatal(err)
+		}
 		t.Skip(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
