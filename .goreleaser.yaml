@@ -1,0 +1,31 @@
+# Builds godot-mcp for the six desktop targets. Pure Go (CGO_ENABLED=0), so
+# every binary is static and cross-compiles from one machine.
+version: 2
+project_name: godot-mcp
+
+builds:
+  - id: godot-mcp
+    main: ./cmd/godot-mcp
+    binary: godot-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/orebron/godot-mcp/internal/server.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  extra_files:
+    - glob: ./build-extra/*.zip
