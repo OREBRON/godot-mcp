@@ -100,7 +100,32 @@ GODOT_MCP_E2E_WINDOWED=1 go test ./e2e/ -run Screenshot # opens an editor window
 
 The repository root is also a Godot project (`project.godot`, `demo/`) for working on the plugin. Go folders carry `.gdignore`, so the Godot editor skips them. The `export-ignore` rules in `.gitattributes` keep everything except `addons/godot_mcp/` out of Asset Library downloads.
 
-CI runs vet, the unit tests and the end-to-end tests with Godot 4.7.2 on Ubuntu, macOS and Windows. Pushing a `v*` tag builds the six binaries with GoReleaser and attaches them, along with the plugin zip, to a GitHub release. Before tagging, update the plugin version in both `plugin.cfg` and `plugin.gd`.
+Pushing a `v*` tag builds the six binaries with GoReleaser and attaches them, along with the plugin zip, to a GitHub release. Before tagging, update the plugin version in both `plugin.cfg` and `plugin.gd`.
+
+### CI on self-hosted runners
+
+[`ci.yml`](.github/workflows/ci.yml) runs vet, the unit tests and the end-to-end tests with Godot 4.7.2 on four self-hosted runners. It selects them by the labels GitHub gives every self-hosted runner by default:
+
+| Target | `runs-on` labels |
+|---|---|
+| macOS arm64 | `self-hosted`, `macOS`, `ARM64` |
+| macOS amd64 | `self-hosted`, `macOS`, `X64` |
+| Linux amd64 | `self-hosted`, `Linux`, `X64` (also runs the GoReleaser cross-build) |
+| Windows amd64 | `self-hosted`, `Windows`, `X64` |
+
+What each runner needs:
+
+- **Git and internet access.** `actions/setup-go` downloads Go itself.
+- **Linux and macOS:** `curl` and `unzip`.
+- **Windows:** Windows PowerShell, which every Windows install has.
+- **Godot:** nothing to install by hand. The [install scripts](.github/scripts/) download the official build once per version into the runner's tool cache and check it against the release's `SHA512-SUMS.txt`. Two ways to change this:
+  - To reuse an existing install, set `GODOT_PATH` in the runner's `.env` file.
+  - To download from a mirror instead of GitHub, set `GODOT_DOWNLOAD_BASE`.
+
+Two safety measures:
+
+- **Leftover processes.** The end-to-end tests keep their projects in the job's temp folder. A final step ends any Godot or godot-mcp process still running there. A cancelled job would otherwise leave editors running on the machine.
+- **Fork pull requests.** Pull requests from forks never run on these runners, because a self-hosted runner executes whatever code a workflow hands it. Also turn on *Require approval for all outside collaborators* in the repository's Actions settings.
 
 ## Roadmap
 
