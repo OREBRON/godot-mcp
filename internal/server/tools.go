@@ -293,11 +293,6 @@ type nodeDeleteIn struct {
 	NodePath string `json:"node_path" jsonschema:"node to delete with all of its children, relative to the scene root; the root itself cannot be deleted"`
 }
 
-type editorUndoIn struct {
-	Steps int  `json:"steps,omitempty" jsonschema:"how many actions to undo (default 1, at most 50)"`
-	Redo  bool `json:"redo,omitempty" jsonschema:"redo instead of undo"`
-}
-
 type screenshotIn struct {
 	Viewport string `json:"viewport,omitempty" jsonschema:"\"2d\", \"3d\" or \"auto\" (default: 3d when the scene root is a Node3D, else 2d)"`
 	MaxWidth int    `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
@@ -382,7 +377,7 @@ func (s *Server) addEditorTools() {
 
 	addEditorTool[nodeAddIn](s, &mcp.Tool{
 		Name:        "node_add",
-		Description: "Add a node (by class) or an instanced scene (by res:// path) under a parent in the edited scene, optionally setting properties. Undoable with editor_undo.",
+		Description: "Add a node (by class) or an instanced scene (by res:// path) under a parent in the edited scene, optionally setting properties. The user can undo it with Ctrl+Z.",
 		Annotations: editorEdit,
 	}, "node_add", 15*time.Second, "scene")
 
@@ -394,15 +389,9 @@ func (s *Server) addEditorTools() {
 
 	addEditorTool[nodeDeleteIn](s, &mcp.Tool{
 		Name:        "node_delete",
-		Description: "Delete a node and its children from the edited scene. Undoable with editor_undo until the scene is saved and closed.",
+		Description: "Delete a node and its children from the edited scene. The user can undo it with Ctrl+Z until the scene is closed.",
 		Annotations: destructive,
 	}, "node_delete", 15*time.Second)
-
-	addEditorTool[editorUndoIn](s, &mcp.Tool{
-		Name:        "editor_undo",
-		Description: "Undo (or redo) the last actions in the edited scene's history, the same as Ctrl+Z in the editor. Covers node_* edits and the user's own edits.",
-		Annotations: destructive,
-	}, "editor_undo", 15*time.Second)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "editor_screenshot",

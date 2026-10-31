@@ -1,7 +1,7 @@
 @tool
 extends RefCounted
 ## The commands godot-mcp servers can run in the editor. Every scene change
-## goes through EditorUndoRedoManager, so Ctrl+Z (or editor_undo) reverts it.
+## goes through EditorUndoRedoManager, so the user can revert it with Ctrl+Z.
 ## A handler returns a Dictionary of data, or _fail(...) for an error.
 
 const Codec := preload("res://addons/godot_mcp/variant_codec.gd")
@@ -25,7 +25,6 @@ func _init(plugin: EditorPlugin) -> void:
 		"node_add": _node_add,
 		"node_set_properties": _node_set_properties,
 		"node_delete": _node_delete,
-		"editor_undo": _editor_undo,
 		"editor_screenshot": _editor_screenshot,
 	}
 
@@ -479,22 +478,6 @@ func _node_delete(p: Dictionary) -> Dictionary:
 	ur.commit_action()
 	var removed := owners.filter(func(pair: Array) -> bool: return pair[1] == root).size()
 	return {"deleted": path, "nodes_removed": removed}
-
-
-func _editor_undo(p: Dictionary) -> Dictionary:
-	var root := _root()
-	if root == null:
-		return _fail("NO_SCENE_OPEN", "no scene is open in the editor")
-	var manager := _plugin.get_undo_redo()
-	var history := manager.get_history_undo_redo(manager.get_object_history_id(root))
-	var redo := bool(p.get("redo", false))
-	var steps := clampi(int(p.get("steps", 1)), 1, 50)
-	var done := 0
-	for i in steps:
-		if not (history.redo() if redo else history.undo()):
-			break
-		done += 1
-	return {"redone" if redo else "undone": done, "current_action": history.get_current_action_name()}
 
 
 func _editor_screenshot(p: Dictionary) -> Dictionary:

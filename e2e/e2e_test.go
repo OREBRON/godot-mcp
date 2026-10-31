@@ -162,8 +162,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 15 {
-		t.Errorf("got %d tools, want 15", len(tools.Tools))
+	if len(tools.Tools) != 14 {
+		t.Errorf("got %d tools, want 14", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -225,12 +225,9 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("scene_tree shows the inside of an instanced scene: %s", treeJSON)
 	}
 
-	ok("node_delete", map[string]any{"node_path": "Hero"})
-	fails("node_get", map[string]any{"node_path": "Hero"}, "NODE_NOT_FOUND")
-	ok("editor_undo", nil)
-	if p := ok("node_get", map[string]any{"node_path": "Hero"})["properties"].(map[string]any); p["position"] != "Vector2(5, 6)" {
-		t.Errorf("after undo Hero = %v", p)
-	}
+	ok("node_add", map[string]any{"type": "Node2D", "name": "Temp", "parent_path": "Hero"})
+	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
+	fails("node_get", map[string]any{"node_path": "Hero/Temp"}, "NODE_NOT_FOUND")
 
 	ok("scene_save", nil)
 	saved, err := os.ReadFile(filepath.Join(proj, "levels", "test_level.tscn"))

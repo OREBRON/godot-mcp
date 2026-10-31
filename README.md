@@ -18,7 +18,7 @@ godot-mcp (Go binary)
    │ WebSocket on 127.0.0.1, token from <project>/.godot/godot_mcp/bridge.json
    ▼
 addons/godot_mcp (editor plugin, GDScript)
-   └── scene_*, node_*, editor_* tools, all undoable with Ctrl+Z
+   └── scene_*, node_* and editor_screenshot; edits are undoable with Ctrl+Z
 ```
 
 The plugin is the listener, so several agent sessions can share one open editor. The server spawns the game process itself and reads its stdout and stderr directly, instead of scraping the editor's Output panel.
@@ -71,7 +71,6 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `node_add` | yes | Adds a node by class (built-in or `class_name`) or instances a `.tscn`, optionally setting properties. |
 | `node_set_properties` | yes | Sets several properties in one undoable action. Accepts JSON values or Godot's text form, and `res://` paths for resources and scripts. |
 | `node_delete` | yes | Deletes a node and its children. Undoable. |
-| `editor_undo` | yes | Undo or redo in the scene history, the same as Ctrl+Z and Ctrl+Shift+Z. |
 | `editor_screenshot` | yes (windowed) | PNG of the editor's 2D or 3D viewport. |
 
 Errors carry a stable `code` plus a `hint` that says what to do next. For example, `NODE_NOT_FOUND` lists the children that do exist at that path, and `PROPERTY_NOT_FOUND` suggests properties with similar names.
@@ -82,6 +81,7 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
 - **New `class_name` scripts are unknown until Godot rescans the project.** `script_check` refreshes the class cache before parsing:
   - With the editor connected, it asks the editor to rescan (the editor owns `.godot/`).
   - Without the editor, it runs `godot --import`, and only when a `class_name` script changed.
+- **No undo tool.** Godot does not give plugins the editor's own undo and redo, and calling the history's `UndoRedo` directly gets the editor's undo stack out of step, so the next Ctrl+Z undoes the wrong action. MCP edits stay in the editor's history, so the user can undo them with Ctrl+Z; an agent reverts its own change by making the opposite one.
 - **One writer per project.** Scene edits go through the open editor. Writing a `.tscn` by hand while the editor has it open loses changes on the editor's next save.
 - **Paths are portable.** The server converts every path to a `res://` path. It refuses paths that leave the project, including through `..\` (Godot reads `\` as a separator on every OS) and through symbolic links or junctions that point outside. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
 - **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running.
