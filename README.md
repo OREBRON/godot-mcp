@@ -83,7 +83,7 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
   - With the editor connected, it asks the editor to rescan (the editor owns `.godot/`).
   - Without the editor, it runs `godot --import`, and only when a `class_name` script changed.
 - **One writer per project.** Scene edits go through the open editor. Writing a `.tscn` by hand while the editor has it open loses changes on the editor's next save.
-- **Paths are portable.** The server converts every path to a `res://` path. It refuses paths outside the project. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
+- **Paths are portable.** The server converts every path to a `res://` path. It refuses paths that leave the project, including through `..\` (Godot reads `\` as a separator on every OS) and through symbolic links or junctions that point outside. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
 - **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running.
 - **Security.**
   - The plugin binds to `127.0.0.1` only. This also avoids the Windows Firewall prompt.

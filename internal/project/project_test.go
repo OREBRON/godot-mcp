@@ -3,7 +3,6 @@ package project
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -65,9 +64,8 @@ func TestToRes(t *testing.T) {
 		"scenes/main.tscn":                            "res://scenes/main.tscn",
 		filepath.Join(p.Dir, "scenes", "player.tscn"): "res://scenes/player.tscn",
 		"uid://abc123":                                "uid://abc123",
-	}
-	if runtime.GOOS == "windows" {
-		ok[`scenes\win.tscn`] = "res://scenes/win.tscn"
+		`scenes\win.tscn`:                             "res://scenes/win.tscn",
+		`res://a\..\b.gd`:                             "res://b.gd",
 	}
 	for in, want := range ok {
 		got, err := p.ToRes(in)
@@ -75,7 +73,8 @@ func TestToRes(t *testing.T) {
 			t.Errorf("ToRes(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"res://../secret.txt", "../outside.gd", filepath.Join(filepath.Dir(p.Dir), "x.gd"), ""} {
+	// Godot reads "\" as a separator on every OS, so these leave the project.
+	for _, bad := range []string{"res://../secret.txt", "../outside.gd", `res://..\outside.tscn`, `..\outside.gd`, "res:///etc/passwd", filepath.Join(filepath.Dir(p.Dir), "x.gd"), ""} {
 		if got, err := p.ToRes(bad); err == nil {
 			t.Errorf("ToRes(%q) = %q, want an error", bad, got)
 		}
@@ -83,6 +82,24 @@ func TestToRes(t *testing.T) {
 	osPath, err := p.ToOS("res://a/b.gd")
 	if err != nil || osPath != filepath.Join(p.Dir, "a", "b.gd") {
 		t.Errorf("ToOS = %q, %v", osPath, err)
+	}
+}
+
+func TestToResRejectsLinksOutside(t *testing.T) {
+	p := newProject(t, "config_version=5\n")
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "secret.gd"), nil, 0o644)
+	if err := os.Symlink(outside, filepath.Join(p.Dir, "escape")); err != nil {
+		t.Skip("cannot create symbolic links here:", err)
+	}
+	os.MkdirAll(filepath.Join(p.Dir, "real"), 0o755)
+	os.Symlink(filepath.Join(p.Dir, "real"), filepath.Join(p.Dir, "inside"))
+
+	if got, err := p.ToRes("res://escape/secret.gd"); err == nil || !strings.Contains(err.Error(), "outside the project") {
+		t.Errorf("link to outside: ToRes = %q, %v; want an error", got, err)
+	}
+	if got, err := p.ToRes("res://inside/new.gd"); err != nil || got != "res://inside/new.gd" {
+		t.Errorf("link inside the project: ToRes = %q, %v", got, err)
 	}
 }
 

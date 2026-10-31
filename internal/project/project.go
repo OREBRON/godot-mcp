@@ -118,7 +118,7 @@ func (p *Project) MCPDir() string {
 
 // ToRes converts a res:// path, a project-relative path or an absolute OS
 // path inside the project into a clean res:// path. Paths that leave the
-// project are rejected.
+// project, directly or through a symbolic link, are rejected.
 func (p *Project) ToRes(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("empty path")
@@ -138,14 +138,52 @@ func (p *Project) ToRes(path string) (string, error) {
 	} else {
 		rel = path
 	}
+	// Godot treats "\" as a separator on every OS, so "..\" must count as a
+	// parent step on Linux and macOS too.
+	rel = strings.ReplaceAll(rel, `\`, "/")
 	rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
 	if rel == "." {
 		rel = ""
 	}
-	if rel == ".." || strings.HasPrefix(rel, "../") {
+	if rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, "/") {
 		return "", fmt.Errorf("%s is outside the project folder %s", path, p.Dir)
 	}
+	if err := p.checkLinks(rel); err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
 	return "res://" + rel, nil
+}
+
+// checkLinks rejects a project-relative path whose existing part passes
+// through a symbolic link (or Windows junction) that points outside the
+// project.
+func (p *Project) checkLinks(rel string) error {
+	if rel == "" {
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(p.Dir)
+	if err != nil {
+		return err
+	}
+	cur := p.Dir
+	for _, part := range strings.Split(rel, "/") {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if err != nil {
+			return nil // the rest does not exist yet, so it holds no links
+		}
+		if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 {
+			continue
+		}
+		target, err := filepath.EvalSymlinks(cur)
+		if err != nil {
+			return fmt.Errorf("the link %s cannot be resolved: %v", cur, err)
+		}
+		if r, err := filepath.Rel(root, target); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("the link %s points outside the project, to %s", cur, target)
+		}
+	}
+	return nil
 }
 
 // ToOS converts a res:// path to an absolute OS path.
