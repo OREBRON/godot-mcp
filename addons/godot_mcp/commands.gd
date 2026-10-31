@@ -83,6 +83,25 @@ func _inside(node: Node) -> bool:
 	return node == root or root.is_ancestor_of(node)
 
 
+## Refuses edits to nodes that come from an instanced scene. Godot saves
+## changes to them only when the instance has Editable Children, and never
+## lets them be deleted or moved: they belong to the other scene's file.
+## structural is true for deleting the node, false for changing it or adding
+## children to it.
+func _check_editable(node: Node, structural: bool) -> Variant:
+	var root := _root()
+	if node == root or node.owner == root:
+		return null
+	var instance := node.owner
+	if not structural and instance != null and root.is_editable_instance(instance):
+		return null
+	var source := instance.scene_file_path if instance != null else "another scene"
+	var hint := "change it in %s (open it with scene_open)" % source
+	if not structural and instance != null:
+		hint += ", or enable Editable Children on \"%s\" in the editor" % _rel(instance)
+	return _fail("FOREIGN_NODE", "\"%s\" belongs to the instanced scene %s" % [_rel(node), source], hint)
+
+
 ## Returns the node at a path relative to the scene root, or an error that
 ## lists what does exist there.
 func _resolve(path: String) -> Variant:
@@ -349,6 +368,9 @@ func _node_add(p: Dictionary) -> Dictionary:
 	var parent = _resolve(str(p.get("parent_path", ".")))
 	if _is_error(parent):
 		return parent
+	var foreign = _check_editable(parent, false)
+	if foreign != null:
+		return foreign
 	var root := _root()
 	var type := str(p.get("type", ""))
 	var scene_path := str(p.get("scene", ""))
@@ -401,6 +423,9 @@ func _node_set_properties(p: Dictionary) -> Dictionary:
 	var node = _resolve(str(p.get("node_path", "")))
 	if _is_error(node):
 		return node
+	var foreign = _check_editable(node, false)
+	if foreign != null:
+		return foreign
 	var props = p.get("properties", {})
 	if not (props is Dictionary) or props.is_empty():
 		return _fail("INVALID_PARAMS", "properties must be a non-empty object")
@@ -419,11 +444,14 @@ func _node_set_properties(p: Dictionary) -> Dictionary:
 	return {"path": _rel(node), "properties": out}
 
 
-func _collect_owned(node: Node, root: Node, out: Array) -> void:
-	if node.owner == root:
-		out.append(node)
+## Collects [node, owner] for node and everything below it that has an
+## owner. remove_child() clears owners that end up outside the removed
+## branch, so undo has to put each one back.
+func _collect_owners(node: Node, out: Array) -> void:
+	if node.owner != null:
+		out.append([node, node.owner])
 	for c in node.get_children():
-		_collect_owned(c, root, out)
+		_collect_owners(c, out)
 
 
 func _node_delete(p: Dictionary) -> Dictionary:
@@ -433,20 +461,24 @@ func _node_delete(p: Dictionary) -> Dictionary:
 	var root := _root()
 	if node == root:
 		return _fail("INVALID_PARAMS", "the scene root cannot be deleted", "delete its children, or create a new scene with scene_create")
+	var foreign = _check_editable(node, true)
+	if foreign != null:
+		return foreign
 	var path := _rel(node)
 	var parent: Node = node.get_parent()
-	var owned := []
-	_collect_owned(node, root, owned)
+	var owners := []
+	_collect_owners(node, owners)
 	var ur := _plugin.get_undo_redo()
 	ur.create_action("MCP: delete %s" % node.name)
 	ur.add_do_method(parent, "remove_child", node)
 	ur.add_undo_method(parent, "add_child", node, true)
 	ur.add_undo_method(parent, "move_child", node, node.get_index())
-	for n in owned:
-		ur.add_undo_method(n, "set_owner", root)
+	for pair in owners:
+		ur.add_undo_method(pair[0], "set_owner", pair[1])
 	ur.add_undo_reference(node)
 	ur.commit_action()
-	return {"deleted": path, "nodes_removed": owned.size()}
+	var removed := owners.filter(func(pair: Array) -> bool: return pair[1] == root).size()
+	return {"deleted": path, "nodes_removed": removed}
 
 
 func _editor_undo(p: Dictionary) -> Dictionary:

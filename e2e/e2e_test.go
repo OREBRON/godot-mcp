@@ -207,6 +207,12 @@ func TestEndToEnd(t *testing.T) {
 	if player["properties"].(map[string]any)["speed"] != 50.0 {
 		t.Errorf("instanced Player speed = %v", player["properties"])
 	}
+	// The insides of an instanced scene belong to player.tscn: readable, but
+	// not deletable, and not editable without Editable Children.
+	ok("node_get", map[string]any{"node_path": "Player/Shape"})
+	fails("node_delete", map[string]any{"node_path": "Player/Shape"}, "FOREIGN_NODE")
+	fails("node_set_properties", map[string]any{"node_path": "Player/Shape", "properties": map[string]any{"disabled": true}}, "Editable Children")
+	fails("node_add", map[string]any{"parent_path": "Player/Shape", "type": "Node"}, "FOREIGN_NODE")
 
 	tree := ok("scene_tree", nil)
 	treeJSON, _ := json.Marshal(tree)
