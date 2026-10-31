@@ -205,3 +205,21 @@ func (r *Runner) Output(since, max int) (lines []Line, next, dropped int) {
 	lines = append(lines, r.lines[start:end]...)
 	return lines, first + end, dropped
 }
+
+// Issues parses error blocks in lines one stream at a time. stdout and
+// stderr are read concurrently, so in the merged order a line from one
+// stream can land between an error and its "at:" line from the other.
+// stderr comes first: Godot writes errors and warnings there.
+func Issues(lines []Line) []godot.Issue {
+	var out []godot.Issue
+	for _, stream := range []string{"stderr", "stdout"} {
+		var texts []string
+		for _, l := range lines {
+			if l.Stream == stream {
+				texts = append(texts, l.Text)
+			}
+		}
+		out = append(out, godot.ParseIssues(texts)...)
+	}
+	return out
+}

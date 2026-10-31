@@ -69,7 +69,7 @@ func TestRunAndStop(t *testing.T) {
 	if !strings.Contains(text, "args: --path") || !strings.Contains(text, "--headless res://main.tscn -- --level=2") {
 		t.Errorf("unexpected arguments in output:\n%s", text)
 	}
-	if is := godot.ParseIssues(all); len(is) != 1 || is[0].File != "res://player.gd" || is[0].Line != 12 {
+	if is := Issues(lines); len(is) != 1 || is[0].File != "res://player.gd" || is[0].Line != 12 {
 		t.Errorf("issues = %+v", is)
 	}
 	if st := r.Status(); !st.Running || st.PID == 0 {
@@ -96,6 +96,18 @@ func TestRunAndStop(t *testing.T) {
 	}
 	if stopped, _ := r.Stop(); stopped {
 		t.Error("second Stop reported a running game")
+	}
+}
+
+func TestIssuesAcrossInterleavedStreams(t *testing.T) {
+	lines := []Line{
+		{N: 0, Stream: "stderr", Text: "SCRIPT ERROR: Invalid call. Nonexistent function 'jump'."},
+		{N: 1, Stream: "stdout", Text: "player spawned"},
+		{N: 2, Stream: "stderr", Text: "          at: _ready (res://player.gd:12)"},
+	}
+	is := Issues(lines)
+	if len(is) != 1 || is[0].File != "res://player.gd" || is[0].Line != 12 {
+		t.Errorf("issues = %+v", is)
 	}
 }
 

@@ -170,7 +170,7 @@ func (s *Server) outputPayload(since, max int, errorsOnly bool) map[string]any {
 	for i, l := range lines {
 		texts[i] = l.Text
 	}
-	issues := godot.ParseIssues(texts)
+	issues := game.Issues(lines)
 	out := map[string]any{"status": s.runner.Status(), "next_since": next, "errors": issues}
 	if !errorsOnly {
 		out["lines"] = texts
