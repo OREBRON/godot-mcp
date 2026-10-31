@@ -197,6 +197,16 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"position": map[string]any{"x": 5, "y": 6}, "visible": false}})
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"positon": []any{1, 2}}}, "position")
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"position": "left"}}, "INVALID_VALUE")
+	// Resources must fit the property's class, and scripts the node's class.
+	write(t, filepath.Join(proj, "shapes", "box.tres"), "[gd_resource type=\"RectangleShape2D\" format=3]\n\n[resource]\nsize = Vector2(8, 8)\n")
+	ok("node_add", map[string]any{"type": "CollisionShape2D", "name": "Hit"})
+	fails("node_set_properties", map[string]any{"node_path": "Hit", "properties": map[string]any{"shape": "res://demo/player.tscn"}}, "needs Shape2D")
+	ok("node_set_properties", map[string]any{"node_path": "Hit", "properties": map[string]any{"shape": "res://shapes/box.tres"}})
+	if p := ok("node_get", map[string]any{"node_path": "Hit", "properties": []any{"shape"}})["properties"].(map[string]any); p["shape"] != "res://shapes/box.tres" {
+		t.Errorf("Hit shape = %v", p["shape"])
+	}
+	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"script": "res://demo/player.gd"}}, "extends CharacterBody2D")
+
 	// Paths inside property values get the same checks as tool paths.
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": "res://../outside.png"}}, "leaves the project")
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": `res://demo\..\..\outside.png`}}, "leaves the project")

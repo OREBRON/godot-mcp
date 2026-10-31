@@ -42,10 +42,11 @@ static func encode(v: Variant) -> Variant:
 	return text
 
 
-## Converts a JSON value for a property of the given Variant type. Returns
-## {"value": v} or {"error": message}. current is the property's present
-## value, used for examples in error messages.
-static func decode(value: Variant, type: int, current: Variant) -> Dictionary:
+## Converts a JSON value for a property. info is the property's entry from
+## get_property_list(). Returns {"value": v} or {"error": message}. current
+## is the property's present value, used for examples in error messages.
+static func decode(value: Variant, info: Dictionary, current: Variant) -> Dictionary:
+	var type: int = info.get("type", TYPE_NIL)
 	if value == null:
 		return {"value": null}
 	match type:
@@ -86,6 +87,10 @@ static func decode(value: Variant, type: int, current: Variant) -> Dictionary:
 					var res := load(path)
 					if res == null:
 						return {"error": "%s could not be loaded; check it with script_check if it is a script" % value}
+					# Godot would quietly store null for a resource of the wrong class.
+					var mismatch := _class_mismatch(res, info)
+					if not mismatch.is_empty():
+						return {"error": mismatch}
 					return {"value": res}
 			return {"error": "expected a res:// path to a resource or script, or null"}
 		TYPE_COLOR:
@@ -115,6 +120,43 @@ static func decode(value: Variant, type: int, current: Variant) -> Dictionary:
 			return {"value": converted}
 	var example: String = var_to_str(current) if current != null else type_string(type) + "(...)"
 	return {"error": "expected %s, e.g. %s; got %s" % [type_string(type), example, JSON.stringify(value)]}
+
+
+## Returns why res cannot go into the property described by info, or "".
+## A resource-type hint lists the allowed classes, comma-separated, with a
+## leading "-" for excluded ones.
+static func _class_mismatch(res: Resource, info: Dictionary) -> String:
+	var classes: PackedStringArray = []
+	if info.get("hint", PROPERTY_HINT_NONE) == PROPERTY_HINT_RESOURCE_TYPE:
+		classes = str(info.get("hint_string", "")).split(",", false)
+	elif not str(info.get("class_name", "")).is_empty():
+		classes = [str(info.class_name)]
+	var allowed := []
+	for c in classes:
+		var name := c.strip_edges()
+		if name.begins_with("-"):
+			if _is_a(res, name.substr(1)):
+				return "%s is a %s, which this property does not accept" % [res.resource_path, name.substr(1)]
+		else:
+			allowed.append(name)
+	if allowed.is_empty():
+		return ""
+	for name in allowed:
+		if _is_a(res, name):
+			return ""
+	return "needs %s, but %s is a %s" % [" or ".join(allowed), res.resource_path, res.get_class()]
+
+
+## Whether res is of the built-in class or class_name name.
+static func _is_a(res: Resource, name: String) -> bool:
+	if res.is_class(name):
+		return true
+	var script: Script = res.get_script()
+	while script != null:
+		if script.get_global_name() == name:
+			return true
+		script = script.get_base_script()
+	return false
 
 
 ## Turns a uid:// or res:// reference into a clean res:// path; "\\" counts as

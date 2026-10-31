@@ -129,25 +129,24 @@ func _resolve(path: String) -> Variant:
 	return _fail("NODE_NOT_FOUND", "no node at \"%s\"" % p, "children of \"%s\": %s" % [_rel(cur), ", ".join(kids) if not kids.is_empty() else "(none)"])
 
 
-## Type of a property, following "a:b" sub-paths into resources; -1 if the
+## The property-list entry of a property (type, hint, hint_string,
+## class_name), following "a:b" sub-paths into resources; {} if the
 ## property does not exist.
-func _property_type(obj: Object, path: String) -> int:
+func _property_info(obj: Object, path: String) -> Dictionary:
 	var parts := path.split(":")
 	for i in parts.size():
-		var found := -1
+		var found := {}
 		for info in obj.get_property_list():
 			if info.name == parts[i]:
-				found = info.type
+				found = info
 				break
-		if found == -1:
-			return -1
-		if i == parts.size() - 1:
+		if found.is_empty() or i == parts.size() - 1:
 			return found
 		var next = obj.get(parts[i])
 		if not (next is Object):
-			return -1
+			return {}
 		obj = next
-	return -1
+	return {}
 
 
 func _similar_properties(obj: Object, name: String) -> String:
@@ -188,15 +187,20 @@ func _prepare_changes(node: Node, props: Dictionary) -> Variant:
 	var changes := []
 	for key in props:
 		var name := str(key)
-		var type := _property_type(node, name)
-		if type == -1:
+		var info := _property_info(node, name)
+		if info.is_empty():
 			var similar := _similar_properties(node, name.get_slice(":", 0))
 			return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "read the node's properties with node_get")
 		var np := NodePath(name)
 		var current = node.get_indexed(np)
-		var conv := Codec.decode(props[key], type, current)
+		var conv := Codec.decode(props[key], info, current)
 		if conv.has("error"):
 			return _fail("INVALID_VALUE", "%s: %s" % [name, conv.error])
+		# A script only fits a node of the class it extends (or a subclass).
+		if name == "script" and conv.value is Script:
+			var base: StringName = conv.value.get_instance_base_type()
+			if not node.is_class(base):
+				return _fail("INVALID_VALUE", "script: %s extends %s, which %s is not" % [conv.value.resource_path, base, node.get_class()], "attach it to a %s, or change its extends line" % base)
 		changes.append([np, current, conv.value])
 	return changes
 
@@ -289,7 +293,7 @@ func _node_get(p: Dictionary) -> Dictionary:
 	else:
 		for key in wanted:
 			var name := str(key)
-			if _property_type(node, name) == -1:
+			if _property_info(node, name).is_empty():
 				var similar := _similar_properties(node, name.get_slice(":", 0))
 				return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "")
 			out[name] = Codec.encode(node.get_indexed(NodePath(name)))
