@@ -122,10 +122,16 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 	if len(scripts) == 0 {
 		return CheckResult{OK: true, Notes: []string{"no .gd files to check"}}, nil
 	}
-	dir := p.MCPDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(p.MCPDir(), 0o755); err != nil {
 		return CheckResult{}, err
 	}
+	// Each run gets its own folder: several agent sessions may check
+	// scripts in the same project at once.
+	dir, err := os.MkdirTemp(p.MCPDir(), "check-")
+	if err != nil {
+		return CheckResult{}, err
+	}
+	defer os.RemoveAll(dir)
 	runner := filepath.Join(dir, "check_scripts.gd")
 	if err := os.WriteFile(runner, checkScript, 0o644); err != nil {
 		return CheckResult{}, err
@@ -167,12 +173,25 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 		return CheckResult{}, fmt.Errorf("%s\nLast output:\n%s", msg, tail(string(out), 20))
 	}
 
-	byFile := map[string][]Issue{}
-	var other []Issue
 	listed := map[string]bool{}
 	for _, s := range scripts {
 		listed[s] = true
 	}
+	reported := map[string]bool{}
+	for _, l := range loaded {
+		reported[l.Path] = true
+	}
+	if len(reported) != len(listed) || len(loaded) != len(listed) {
+		return CheckResult{}, fmt.Errorf("the checker reported %d files but %d were requested; run script_check again", len(loaded), len(listed))
+	}
+	for s := range listed {
+		if !reported[s] {
+			return CheckResult{}, fmt.Errorf("the checker did not report %s; run script_check again", s)
+		}
+	}
+
+	byFile := map[string][]Issue{}
+	var other []Issue
 	for _, is := range ParseIssues(lines) {
 		if is.Severity != "error" {
 			continue

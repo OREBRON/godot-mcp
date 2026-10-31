@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,8 +33,11 @@ type session struct {
 	t         *testing.T
 	ctx       context.Context
 	cs        *mcp.ClientSession
+	server    *exec.Cmd // the godot-mcp process behind cs
 	proj      string
 	editorLog string
+	bin       string
+	godotPath string
 }
 
 func start(t *testing.T, headless bool) *session {
@@ -89,13 +93,23 @@ func start(t *testing.T, headless bool) *session {
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/godot-mcp").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
+	s := &session{t: t, ctx: ctx, proj: proj, editorLog: editorLog.Name(), bin: bin, godotPath: g.Path}
+	s.cs, s.server = s.connect()
+	return s
+}
+
+// connect starts another godot-mcp server on the same project, as a second
+// agent session would.
+func (s *session) connect() (*mcp.ClientSession, *exec.Cmd) {
+	s.t.Helper()
+	cmd := exec.Command(s.bin, "--project", s.proj, "--godot", s.godotPath)
 	client := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "0"}, nil)
-	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.Command(bin, "--project", proj, "--godot", g.Path)}, nil)
+	cs, err := client.Connect(s.ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		t.Fatal(err)
+		s.t.Fatal(err)
 	}
-	t.Cleanup(func() { cs.Close() })
-	return &session{t: t, ctx: ctx, cs: cs, proj: proj, editorLog: editorLog.Name()}
+	s.t.Cleanup(func() { cs.Close() })
+	return cs, cmd
 }
 
 func (s *session) result(name string, args map[string]any) *mcp.CallToolResult {
@@ -228,6 +242,33 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("class_name script not resolved: %v", c)
 	}
 	fails("script_check", map[string]any{"paths": []any{"../outside.gd"}}, "outside")
+
+	// Two sessions checking different files at the same time must each get
+	// their own result.
+	cs2, _ := s.connect()
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			res, err := s.cs.CallTool(s.ctx, &mcp.CallToolParams{Name: "script_check", Arguments: map[string]any{"paths": []any{"scripts/broken.gd"}}})
+			if err != nil || res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, `"checked":1,"failed":1`) {
+				t.Errorf("session 1 check: %v %+v", err, res)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			res, err := cs2.CallTool(s.ctx, &mcp.CallToolParams{Name: "script_check", Arguments: map[string]any{"paths": []any{"scripts/user.gd", "scripts/helper.gd"}}})
+			if err != nil || res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, `"checked":2,"failed":0`) {
+				t.Errorf("session 2 check: %v %+v", err, res)
+			}
+		}()
+	}
+	wg.Wait()
+	if entries, _ := os.ReadDir(filepath.Join(proj, ".godot", "godot_mcp")); len(entries) != 1 {
+		t.Errorf("script_check left files behind: %v", entries)
+	}
+
 	if runtime.GOOS != "linux" {
 		fails("script_check", map[string]any{"paths": []any{"Scripts/user.gd"}}, "letter case")
 	}
