@@ -82,20 +82,24 @@ type response struct {
 	Commands      []string `json:"commands"`
 }
 
+// editorHints go into errors about the editor connection.
+var editorHints = Hints{
+	Timeout:      "the editor may be busy importing, showing a modal dialog, or minimised; check the editor window",
+	Disconnected: "the editor may have been closed or the plugin reloaded; call the tool again",
+}
+
 // Client is a lazily connected, self-reconnecting bridge client.
 type Client struct {
 	infoPath string
 
-	mu      sync.Mutex
-	conn    *websocket.Conn
-	hello   Hello
-	nextID  int
-	pending map[string]chan response
+	mu    sync.Mutex
+	peer  *Peer
+	hello Hello
 }
 
 // New creates a client that reads bridge.json from mcpDir.
 func New(mcpDir string) *Client {
-	return &Client{infoPath: filepath.Join(mcpDir, "bridge.json"), pending: map[string]chan response{}}
+	return &Client{infoPath: filepath.Join(mcpDir, "bridge.json")}
 }
 
 // ReadInfo reads bridge.json.
@@ -113,14 +117,14 @@ func (c *Client) ReadInfo() (Info, error) {
 func (c *Client) Connected() (Hello, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.hello, c.conn != nil
+	return c.hello, c.peer != nil && c.peer.Alive()
 }
 
 // Connect opens the connection if it is not open yet.
 func (c *Client) Connect(ctx context.Context) (Hello, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.conn != nil {
+	if c.peer != nil && c.peer.Alive() {
 		return c.hello, nil
 	}
 	info, err := c.ReadInfo()
@@ -168,47 +172,9 @@ func (c *Client) Connect(ctx context.Context) (Hello, error) {
 		}
 		return Hello{}, fmt.Errorf("%w: unexpected handshake reply %q", ErrNotConnected, r.Type)
 	}
-	c.conn = conn
+	c.peer = NewPeer(conn, "the editor", editorHints)
 	c.hello = Hello{Protocol: r.Protocol, GodotVersion: r.GodotVersion, PluginVersion: r.PluginVersion, Commands: r.Commands}
-	go c.readLoop(conn)
 	return c.hello, nil
-}
-
-func (c *Client) readLoop(conn *websocket.Conn) {
-	for {
-		_, data, err := conn.Read(context.Background())
-		if err != nil {
-			c.drop(conn, err)
-			return
-		}
-		var r response
-		if json.Unmarshal(data, &r) != nil || r.ID == "" {
-			continue
-		}
-		c.mu.Lock()
-		ch := c.pending[r.ID]
-		delete(c.pending, r.ID)
-		c.mu.Unlock()
-		if ch != nil {
-			ch <- r
-		}
-	}
-}
-
-// drop forgets conn and fails every request waiting on it.
-func (c *Client) drop(conn *websocket.Conn, cause error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != conn {
-		return
-	}
-	conn.CloseNow()
-	c.conn = nil
-	c.hello = Hello{}
-	for id, ch := range c.pending {
-		ch <- response{ID: id, Error: &Error{Code: "DISCONNECTED", Message: "the editor closed the connection: " + cause.Error(), Hint: "the editor may have been closed or the plugin reloaded; call the tool again"}}
-		delete(c.pending, id)
-	}
 }
 
 // Call sends a command and waits for its answer. It connects first when
@@ -217,64 +183,18 @@ func (c *Client) Call(ctx context.Context, command string, params any, timeout t
 	if _, err := c.Connect(ctx); err != nil {
 		return nil, err
 	}
-	if params == nil {
-		params = map[string]any{}
-	}
 	c.mu.Lock()
-	conn := c.conn
-	if conn == nil {
-		c.mu.Unlock()
-		return nil, ErrNotConnected
-	}
-	c.nextID++
-	id := strconv.Itoa(c.nextID)
-	ch := make(chan response, 1)
-	c.pending[id] = ch
+	p := c.peer
 	c.mu.Unlock()
-
-	msg, err := json.Marshal(map[string]any{"id": id, "command": command, "params": params})
-	if err != nil {
-		c.forget(id)
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
-		c.forget(id)
-		c.drop(conn, err)
-		return nil, fmt.Errorf("%w: sending %s: %v", ErrNotConnected, command, err)
-	}
-	select {
-	case r := <-ch:
-		if r.Error != nil {
-			return nil, r.Error
-		}
-		if !r.OK {
-			return nil, &Error{Code: "BAD_RESPONSE", Message: "the plugin answered without ok or error"}
-		}
-		return r.Data, nil
-	case <-ctx.Done():
-		c.forget(id)
-		return nil, &Error{
-			Code:    "TIMEOUT",
-			Message: fmt.Sprintf("%s got no answer within %s", command, timeout),
-			Hint:    "the editor may be busy importing, showing a modal dialog, or minimised; check the editor window",
-		}
-	}
-}
-
-func (c *Client) forget(id string) {
-	c.mu.Lock()
-	delete(c.pending, id)
-	c.mu.Unlock()
+	return p.Call(ctx, command, params, timeout)
 }
 
 // Close closes the connection.
 func (c *Client) Close() {
 	c.mu.Lock()
-	conn := c.conn
+	p := c.peer
 	c.mu.Unlock()
-	if conn != nil {
-		conn.Close(websocket.StatusNormalClosure, "bye")
+	if p != nil {
+		p.Close()
 	}
 }
