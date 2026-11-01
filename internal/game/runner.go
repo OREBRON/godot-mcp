@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -35,12 +36,16 @@ type Status struct {
 	Uptime   string   `json:"uptime,omitempty"`
 	ExitCode *int     `json:"exit_code,omitempty"`
 	Lines    int      `json:"total_lines"`
+	// Bridge is "connected" once the game's bridge has dialled back,
+	// "waiting" before that, and empty when no game runs.
+	Bridge string `json:"bridge,omitempty"`
 }
 
 // Runner holds at most one running game.
 type Runner struct {
 	mu       sync.Mutex
 	cmd      *exec.Cmd
+	link     *Link
 	args     []string
 	started  time.Time
 	done     chan struct{}
@@ -54,25 +59,37 @@ func New() *Runner { return &Runner{} }
 // ErrRunning is returned by Start when a game is already running.
 var ErrRunning = errors.New("a game is already running")
 
-// Start launches `godot --path dir [--headless] [scene] [-- userArgs]`.
-func (r *Runner) Start(e godot.Exec, dir, scene string, headless bool, userArgs []string) error {
+// StartOptions describe one run.
+type StartOptions struct {
+	Scene    string   // scene to launch; empty launches the project's main scene
+	Headless bool     // no window, no rendering
+	Args     []string // arguments for the game, after "--"
+	Env      []string // added to the server's environment
+	Link     *Link    // the run's bridge connection; closed when the run ends
+}
+
+// Start launches `godot --path dir [--headless] [scene] [-- args]`.
+func (r *Runner) Start(e godot.Exec, dir string, opts StartOptions) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cmd != nil && r.exitCode == nil {
 		return ErrRunning
 	}
 	args := []string{"--path", dir}
-	if headless {
+	if opts.Headless {
 		args = append(args, "--headless")
 	}
-	if scene != "" {
-		args = append(args, scene)
+	if opts.Scene != "" {
+		args = append(args, opts.Scene)
 	}
-	if len(userArgs) > 0 {
-		args = append(append(args, "--"), userArgs...)
+	if len(opts.Args) > 0 {
+		args = append(append(args, "--"), opts.Args...)
 	}
 	cmd := e.Command(context.Background(), args...)
 	cmd.Dir = dir
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
 	// os/exec copies the output into these writers and, through WaitDelay,
 	// stops waiting for it once the game has exited, even when a process the
 	// game started still holds the pipes open.
@@ -82,13 +99,16 @@ func (r *Runner) Start(e godot.Exec, dir, scene string, headless bool, userArgs 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", e, err)
 	}
-	r.cmd, r.args, r.started = cmd, args, time.Now()
+	r.cmd, r.link, r.args, r.started = cmd, opts.Link, args, time.Now()
 	r.exitCode, r.lines, r.total = nil, nil, 0
 	r.done = make(chan struct{})
 
-	done := r.done
+	done, link := r.done, opts.Link
 	go func() {
 		cmd.Wait()
+		if link != nil {
+			link.Close()
+		}
 		stdout.flush()
 		stderr.flush()
 		code := -1 // ended by a signal
@@ -193,6 +213,17 @@ func (r *Runner) Stop() (bool, error) {
 	return true, nil
 }
 
+// Link returns the running game's bridge connection, or nil when no game
+// runs.
+func (r *Runner) Link() *Link {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cmd == nil || r.exitCode != nil {
+		return nil
+	}
+	return r.link
+}
+
 // Wait blocks until the game exits or d passes, whichever comes first.
 func (r *Runner) Wait(ctx context.Context, d time.Duration) {
 	r.mu.Lock()
@@ -219,6 +250,12 @@ func (r *Runner) Status() Status {
 		s.Running = true
 		s.PID = r.cmd.Process.Pid
 		s.Uptime = time.Since(r.started).Round(time.Millisecond).String()
+		if r.link != nil {
+			s.Bridge = "waiting"
+			if r.link.Connected() {
+				s.Bridge = "connected"
+			}
+		}
 	}
 	return s
 }

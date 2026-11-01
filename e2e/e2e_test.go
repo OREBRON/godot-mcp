@@ -40,7 +40,8 @@ type session struct {
 	godotPath string
 }
 
-func start(t *testing.T, headless bool) *session {
+// findGodot returns the Godot to test with, or skips the test.
+func findGodot(t *testing.T) godot.Exec {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("needs Godot; skipped with -short")
@@ -54,6 +55,12 @@ func start(t *testing.T, headless bool) *session {
 		}
 		t.Skip(err)
 	}
+	return g
+}
+
+func start(t *testing.T, headless bool) *session {
+	t.Helper()
+	g := findGodot(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
 
@@ -314,6 +321,13 @@ func TestEndToEnd(t *testing.T) {
 	lines, _ := json.Marshal(run["lines"])
 	if !strings.Contains(string(lines), "Demo started: 2 children") {
 		t.Errorf("game_run output = %s", lines)
+	}
+	// The game starts through the harness, whose bridge dials back.
+	if st := run["status"].(map[string]any); st["bridge"] != "connected" {
+		t.Errorf("game_run status = %v, want bridge connected", st)
+	}
+	if issues, _ := json.Marshal(run["errors"]); string(issues) != "[]" && string(issues) != "null" {
+		t.Errorf("the harness run printed errors: %s", issues)
 	}
 	fails("game_run", map[string]any{"headless": true}, "already running")
 	stop := ok("game_stop", nil)

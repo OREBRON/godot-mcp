@@ -59,10 +59,10 @@ func fake(t *testing.T, mode string) godot.Exec {
 
 func TestRunAndStop(t *testing.T) {
 	r := New()
-	if err := r.Start(fake(t, "run"), t.TempDir(), "res://main.tscn", true, []string{"--level=2"}); err != nil {
+	if err := r.Start(fake(t, "run"), t.TempDir(), StartOptions{Scene: "res://main.tscn", Headless: true, Args: []string{"--level=2"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Start(fake(t, "run"), t.TempDir(), "", false, nil); err != ErrRunning {
+	if err := r.Start(fake(t, "run"), t.TempDir(), StartOptions{}); err != ErrRunning {
 		t.Errorf("second Start = %v, want ErrRunning", err)
 	}
 
@@ -129,7 +129,7 @@ func TestIssuesAcrossInterleavedStreams(t *testing.T) {
 
 func TestExitCodeAndCursor(t *testing.T) {
 	r := New()
-	if err := r.Start(fake(t, "exit"), t.TempDir(), "", false, nil); err != nil {
+	if err := r.Start(fake(t, "exit"), t.TempDir(), StartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	r.Wait(context.Background(), 10*time.Second)
@@ -143,7 +143,7 @@ func TestExitCodeAndCursor(t *testing.T) {
 		t.Errorf("cursor: first %d next %d rest %d end %d total %d", len(first), next, len(rest), end, st.Lines)
 	}
 	// A new run is allowed once the old one exited.
-	if err := r.Start(fake(t, "exit"), t.TempDir(), "", false, nil); err != nil {
+	if err := r.Start(fake(t, "exit"), t.TempDir(), StartOptions{}); err != nil {
 		t.Errorf("restart after exit: %v", err)
 	}
 	r.Wait(context.Background(), 10*time.Second)
@@ -151,7 +151,7 @@ func TestExitCodeAndCursor(t *testing.T) {
 
 func TestLongLineDoesNotStopOutput(t *testing.T) {
 	r := New()
-	if err := r.Start(fake(t, "longline"), t.TempDir(), "", false, nil); err != nil {
+	if err := r.Start(fake(t, "longline"), t.TempDir(), StartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	r.Wait(context.Background(), 10*time.Second)
@@ -173,7 +173,7 @@ func TestLongLineDoesNotStopOutput(t *testing.T) {
 
 func TestExitWhileChildHoldsOutput(t *testing.T) {
 	r := New()
-	if err := r.Start(fake(t, "orphan"), t.TempDir(), "", false, nil); err != nil {
+	if err := r.Start(fake(t, "orphan"), t.TempDir(), StartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()

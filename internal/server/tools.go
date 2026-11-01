@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -186,7 +187,8 @@ func (s *Server) addGameTools() {
 		Name: "game_run",
 		Description: "Run the project (or one scene) as a separate Godot process and return its first output and parsed errors. " +
 			"Only one game runs at a time: call game_stop first to restart. The game keeps running after this returns; read more with game_output. " +
-			"Output comes straight from the process, so it is complete and current.",
+			"Output comes straight from the process, so it is complete and current. " +
+			"status.bridge becomes \"connected\" once the game can be driven with the other game_* tools.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gameRunIn) (*mcp.CallToolResult, any, error) {
 		p, err := s.project()
@@ -214,7 +216,31 @@ func (s *Server) addGameTools() {
 		if in.WaitSeconds != nil {
 			wait = min(max(*in.WaitSeconds, 0), 30)
 		}
-		if err := s.runner.Start(e, p.Dir, scene, in.Headless, in.Args); err != nil {
+		// The game starts through a harness scene in the project's data folder,
+		// which adds the bridge for the game_* tools and then changes to the
+		// requested scene. GODOT_MCP_SCENE empty means the main scene.
+		runDir := filepath.Join(p.MCPDir(), "run")
+		runRes, err := p.ToRes(runDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		launch, err := game.InstallHarness(runDir, runRes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("writing the game harness: %w", err)
+		}
+		link, err := game.NewLink()
+		if err != nil {
+			return nil, nil, err
+		}
+		opts := game.StartOptions{
+			Scene:    launch,
+			Headless: in.Headless,
+			Args:     in.Args,
+			Env:      append(link.Env(), "GODOT_MCP_SCENE="+scene),
+			Link:     link,
+		}
+		if err := s.runner.Start(e, p.Dir, opts); err != nil {
+			link.Close()
 			if errors.Is(err, game.ErrRunning) {
 				return nil, nil, errors.New("a game is already running; call game_stop first, or game_output to read it")
 			}
