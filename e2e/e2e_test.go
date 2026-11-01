@@ -169,8 +169,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 14 {
-		t.Errorf("got %d tools, want 14", len(tools.Tools))
+	if len(tools.Tools) != 16 {
+		t.Errorf("got %d tools, want 16", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -330,10 +330,32 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("the harness run printed errors: %s", issues)
 	}
 	fails("game_run", map[string]any{"headless": true}, "already running")
+
+	// The live game, through the bridge.
+	live := ok("game_scene_tree", nil)
+	liveJSON, _ := json.Marshal(live)
+	for _, want := range []string{`"scene":"res://demo/main.tscn"`, `"name":"Main"`, `"name":"Player"`, `"name":"Title"`} {
+		if !strings.Contains(string(liveJSON), want) {
+			t.Errorf("game_scene_tree lacks %s: %s", want, liveJSON)
+		}
+	}
+	rootJSON, _ := json.Marshal(ok("game_scene_tree", map[string]any{"node_path": "/root", "max_depth": 1}))
+	if !strings.Contains(string(rootJSON), `"name":"Main"`) || strings.Contains(string(rootJSON), "GodotMCPBridge") {
+		t.Errorf("game_scene_tree of /root: %s", rootJSON)
+	}
+	if p := ok("game_node_get", map[string]any{"node_path": "Player", "properties": []any{"position", "speed"}})["properties"].(map[string]any); p["position"] != "Vector2(320, 180)" || p["speed"] != 200.0 {
+		t.Errorf("game_node_get Player = %v", p)
+	}
+	if p := ok("game_node_get", map[string]any{"node_path": "Player"})["properties"].(map[string]any); p["position"] != "Vector2(320, 180)" {
+		t.Errorf("game_node_get Player without properties = %v", p)
+	}
+	fails("game_node_get", map[string]any{"node_path": "Nope"}, "NODE_NOT_FOUND")
+	fails("game_node_get", map[string]any{"node_path": "Player", "properties": []any{"positon"}}, "PROPERTY_NOT_FOUND")
 	stop := ok("game_stop", nil)
 	if stop["stopped"] != true {
 		t.Errorf("game_stop = %v", stop)
 	}
+	fails("game_scene_tree", nil, "no game is running")
 	out := ok("game_output", map[string]any{"since": 0, "errors_only": true})
 	if _, has := out["lines"]; has {
 		t.Errorf("errors_only still returned lines")

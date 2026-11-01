@@ -273,6 +273,51 @@ func (s *Server) addGameTools() {
 		r, err := jsonResult(map[string]any{"stopped": stopped, "status": s.runner.Status()})
 		return r, nil, err
 	})
+
+	addGameTool[gameSceneTreeIn](s, &mcp.Tool{
+		Name: "game_scene_tree",
+		Description: "Show the live node tree of the game started by game_run: what exists right now, including nodes created at runtime. " +
+			"Paths are relative to the current scene; absolute paths such as \"/root/Game\" reach autoloads. Read values with game_node_get.",
+		Annotations: readOnly,
+	}, "scene_tree", 15*time.Second)
+
+	addGameTool[gameNodeGetIn](s, &mcp.Tool{
+		Name: "game_node_get",
+		Description: "Read properties of a node in the running game, such as a player's position or a script variable like health. " +
+			"Without properties, returns the stored properties and script variables that differ from their defaults.",
+		Annotations: readOnly,
+	}, "node_get", 15*time.Second)
+}
+
+type gameSceneTreeIn struct {
+	NodePath string `json:"node_path,omitempty" jsonschema:"node to start from: relative to the current scene (\".\", the default, is its root) or absolute such as \"/root/Game\" for an autoload"`
+	MaxDepth int    `json:"max_depth,omitempty" jsonschema:"levels below node_path to include (default 4)"`
+}
+
+type gameNodeGetIn struct {
+	NodePath   string   `json:"node_path" jsonschema:"node relative to the current scene, e.g. \"Player\", or absolute such as \"/root/Game\""`
+	Properties []string `json:"properties,omitempty" jsonschema:"properties to read, e.g. [\"position\", \"velocity\"]; a colon reads into a resource, e.g. \"shape:size\""`
+}
+
+// addGameTool registers a tool that runs a command in the game started by
+// game_run, through its bridge.
+func addGameTool[In any](s *Server, t *mcp.Tool, command string, timeout time.Duration) {
+	mcp.AddTool(s.mcp, t, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		data, err := s.gameCall(ctx, command, in, timeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		return textResult(data), nil, nil
+	})
+}
+
+// gameCall sends a command to the running game's bridge.
+func (s *Server) gameCall(ctx context.Context, command string, params any, timeout time.Duration) (json.RawMessage, error) {
+	link := s.runner.Link()
+	if link == nil {
+		return nil, game.ErrNoGame
+	}
+	return link.Call(ctx, command, params, timeout)
 }
 
 // ---- editor (needs the plugin) ----
