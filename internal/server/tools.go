@@ -303,6 +303,21 @@ func (s *Server) addGameTools() {
 			"to watch input act frame by frame, send it with pressed true, call game_time step, then send pressed false.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
 	}, "input", time.Minute)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "game_screenshot",
+		Description: "Capture the current frame of the game started by game_run, to see what the player sees. " +
+			"Needs a game started without headless. Also reports logical_width and logical_height, the coordinate space " +
+			"game_input positions use; on a HiDPI screen the image has more pixels than that.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gameScreenshotIn) (*mcp.CallToolResult, any, error) {
+		data, err := s.gameCall(ctx, "screenshot", in, 20*time.Second)
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := imageResult(data)
+		return r, nil, err
+	})
 }
 
 type gameInputIn struct {
@@ -312,6 +327,10 @@ type gameInputIn struct {
 	Position    []float64 `json:"position,omitempty" jsonschema:"[x, y] in the game's viewport coordinates; on its own it moves the mouse there"`
 	Duration    *float64  `json:"duration,omitempty" jsonschema:"seconds to hold before releasing (default 0.1)"`
 	Pressed     *bool     `json:"pressed,omitempty" jsonschema:"send only the press (true) or only the release (false), to hold an input across calls such as game_time steps"`
+}
+
+type gameScreenshotIn struct {
+	MaxWidth int `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
 }
 
 type gameTimeIn struct {
@@ -503,23 +522,33 @@ func (s *Server) addEditorTools() {
 		if err != nil {
 			return nil, nil, err
 		}
-		var shot struct {
-			PNG      string `json:"png_base64"`
-			Width    int    `json:"width"`
-			Height   int    `json:"height"`
-			Viewport string `json:"viewport"`
-		}
-		if err := json.Unmarshal(data, &shot); err != nil {
-			return nil, nil, err
-		}
-		png, err := base64.StdEncoding.DecodeString(shot.PNG)
-		if err != nil {
-			return nil, nil, fmt.Errorf("the plugin sent an invalid image: %w", err)
-		}
-		meta := fmt.Sprintf(`{"viewport":%q,"width":%d,"height":%d}`, shot.Viewport, shot.Width, shot.Height)
-		return &mcp.CallToolResult{Content: []mcp.Content{
-			&mcp.ImageContent{Data: png, MIMEType: "image/png"},
-			&mcp.TextContent{Text: meta},
-		}}, nil, nil
+		r, err := imageResult(data)
+		return r, nil, err
 	})
+}
+
+// imageResult turns an answer holding png_base64 into an image, followed by
+// the answer's other fields as JSON text.
+func imageResult(data json.RawMessage) (*mcp.CallToolResult, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	var b64 string
+	if err := json.Unmarshal(fields["png_base64"], &b64); err != nil {
+		return nil, fmt.Errorf("the answer holds no image: %w", err)
+	}
+	png, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("the answer holds an invalid image: %w", err)
+	}
+	delete(fields, "png_base64")
+	meta, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{
+		&mcp.ImageContent{Data: png, MIMEType: "image/png"},
+		&mcp.TextContent{Text: string(meta)},
+	}}, nil
 }

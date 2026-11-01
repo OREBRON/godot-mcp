@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/png"
 	"io/fs"
 	"os"
@@ -170,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Errorf("got %d tools, want 18", len(tools.Tools))
+	if len(tools.Tools) != 19 {
+		t.Errorf("got %d tools, want 19", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -405,6 +406,7 @@ func TestEndToEnd(t *testing.T) {
 	fails("game_input", map[string]any{"action": "teleport"}, "no input action")
 	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
 	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
+	fails("game_screenshot", nil, "NOT_AVAILABLE_HEADLESS")
 	stop := ok("game_stop", nil)
 	if stop["stopped"] != true {
 		t.Errorf("game_stop = %v", stop)
@@ -432,6 +434,11 @@ func TestEditorScreenshot(t *testing.T) {
 	s.ok("scene_open", map[string]any{"path": "res://demo/main.tscn"})
 	res := s.result("editor_screenshot", map[string]any{"max_width": 640})
 	if res.IsError || len(res.Content) != 2 {
+		for _, c := range res.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				t.Logf("text: %s", tc.Text)
+			}
+		}
 		t.Fatalf("editor_screenshot = %+v", res.Content)
 	}
 	img, ok := res.Content[0].(*mcp.ImageContent)
@@ -447,20 +454,57 @@ func TestEditorScreenshot(t *testing.T) {
 		t.Errorf("width %d, want 1..640", b.Dx())
 	}
 	// A blank capture is one colour; the demo scene draws a label.
-	first := decoded.At(b.Min.X, b.Min.Y)
-	uniform := true
-	for y := b.Min.Y; y < b.Max.Y && uniform; y += 4 {
-		for x := b.Min.X; x < b.Max.X; x += 4 {
-			if decoded.At(x, y) != first {
-				uniform = false
-				break
-			}
-		}
-	}
-	if uniform {
+	if uniform(decoded) {
 		t.Error("the screenshot is a single colour")
 	}
 	os.WriteFile(filepath.Join(os.TempDir(), "godot-mcp-e2e-screenshot.png"), img.Data, 0o644)
+}
+
+func TestGameScreenshot(t *testing.T) {
+	if os.Getenv("GODOT_MCP_E2E_WINDOWED") != "1" {
+		t.Skip("opens a game window; set GODOT_MCP_E2E_WINDOWED=1 to run")
+	}
+	s := start(t, true) // the editor stays headless; the game gets a window
+	t.Cleanup(func() { s.call("game_stop", nil) })
+	run := s.ok("game_run", map[string]any{"scene": "res://demo/main.tscn", "wait_seconds": 3})
+	if st := run["status"].(map[string]any); st["bridge"] != "connected" {
+		t.Fatalf("game_run status = %v", st)
+	}
+	res := s.result("game_screenshot", map[string]any{"max_width": 800})
+	if res.IsError || len(res.Content) != 2 {
+		t.Fatalf("game_screenshot = %+v", res.Content)
+	}
+	img := res.Content[0].(*mcp.ImageContent)
+	decoded, err := png.Decode(bytes.NewReader(img.Data))
+	if err != nil {
+		t.Fatalf("not a PNG: %v", err)
+	}
+	if w := decoded.Bounds().Dx(); w == 0 || w > 800 {
+		t.Errorf("width %d, want 1..800", w)
+	}
+	var meta map[string]any
+	json.Unmarshal([]byte(res.Content[1].(*mcp.TextContent).Text), &meta)
+	if meta["logical_width"] != 1152.0 || meta["logical_height"] != 648.0 {
+		t.Errorf("screenshot meta = %v, want logical size 1152x648", meta)
+	}
+	if uniform(decoded) {
+		t.Error("the game screenshot is a single colour")
+	}
+	os.WriteFile(filepath.Join(os.TempDir(), "godot-mcp-e2e-game.png"), img.Data, 0o644)
+}
+
+// uniform reports whether every sampled pixel has the same colour.
+func uniform(img image.Image) bool {
+	b := img.Bounds()
+	first := img.At(b.Min.X, b.Min.Y)
+	for y := b.Min.Y; y < b.Max.Y; y += 4 {
+		for x := b.Min.X; x < b.Max.X; x += 4 {
+			if img.At(x, y) != first {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func copyTree(t *testing.T, src, dst string) {

@@ -29,6 +29,7 @@ func _ready() -> void:
 		"node_get": _node_get,
 		"time": _time,
 		"input": _input_cmd,
+		"screenshot": _screenshot,
 	}
 	_ws.outbound_buffer_size = 64 << 20 # screenshots
 	_ws.inbound_buffer_size = 1 << 20
@@ -471,3 +472,33 @@ func _vec2(raw: Variant) -> Variant:
 			var y: float = d["y"]
 			return Vector2(x, y)
 	return null
+
+
+# ---- screenshot ----
+
+## The game's frame as a PNG, scaled down to max_width. Also reports the
+## viewport's logical size, the coordinate space game_input uses: on a HiDPI
+## screen the image has more pixels than that.
+func _screenshot(params: Dictionary) -> Variant:
+	if DisplayServer.get_name() == "headless":
+		return _fail("NOT_AVAILABLE_HEADLESS", "the game runs headless and draws nothing", "stop it and start it again with game_run without headless")
+	await RenderingServer.frame_post_draw
+	var vp: Viewport = get_viewport()
+	var img: Image = vp.get_texture().get_image()
+	if img == null or img.is_empty():
+		return _fail("CAPTURE_FAILED", "the game's viewport returned no image", "make sure the game window is not minimised")
+	var logical: Vector2 = vp.get_visible_rect().size
+	var max_width: int = _int_param(params, "max_width", 1280)
+	if max_width <= 0:
+		max_width = 1280
+	if img.get_width() > max_width:
+		var height: int = roundi(float(img.get_height()) * float(max_width) / float(img.get_width()))
+		img.resize(max_width, height, Image.INTERPOLATE_LANCZOS)
+	return {
+		"png_base64": Marshalls.raw_to_base64(img.save_png_to_buffer()),
+		"width": img.get_width(),
+		"height": img.get_height(),
+		"logical_width": logical.x,
+		"logical_height": logical.y,
+		"paused": get_tree().paused,
+	}
