@@ -13,3 +13,10 @@ position = Vector2(320, 180)
 offset_right = 200.0
 offset_bottom = 23.0
 text = "Godot MCP demo"
+
+[node name="StartButton" type="Button" parent="."]
+offset_left = 20.0
+offset_top = 60.0
+offset_right = 140.0
+offset_bottom = 100.0
+text = "Start"

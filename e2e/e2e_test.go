@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image/png"
 	"io/fs"
 	"os"
@@ -169,8 +170,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 17 {
-		t.Errorf("got %d tools, want 17", len(tools.Tools))
+	if len(tools.Tools) != 18 {
+		t.Errorf("got %d tools, want 18", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -319,7 +320,7 @@ func TestEndToEnd(t *testing.T) {
 	// Running the game.
 	run := ok("game_run", map[string]any{"scene": "res://demo/main.tscn", "headless": true, "wait_seconds": 3})
 	lines, _ := json.Marshal(run["lines"])
-	if !strings.Contains(string(lines), "Demo started: 2 children") {
+	if !strings.Contains(string(lines), "Demo started: 3 children") {
 		t.Errorf("game_run output = %s", lines)
 	}
 	// The game starts through the harness, whose bridge dials back.
@@ -376,7 +377,34 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("step 10 moved ticks from %v to %v", before, after)
 	}
 	fails("game_time", map[string]any{"action": "rewind"}, "INVALID_PARAMS")
+
+	// Input, frame by frame: hold ui_right for exactly 30 physics frames.
+	// The player moves speed/60 = 200/60 pixels per frame.
+	ok("game_input", map[string]any{"action": "ui_right", "pressed": true})
+	ok("game_time", map[string]any{"action": "step", "frames": 30})
+	ok("game_input", map[string]any{"action": "ui_right", "pressed": false})
+	pos := ok("game_node_get", map[string]any{"node_path": "Player", "properties": []any{"position"}})["properties"].(map[string]any)["position"].(string)
+	var x, y float64
+	if _, err := fmt.Sscanf(pos, "Vector2(%f, %f)", &x, &y); err != nil || x < 419 || x > 421 || y != 180 {
+		t.Errorf("after 30 frames of ui_right the player is at %s, want about Vector2(420, 180)", pos)
+	}
 	ok("game_time", map[string]any{"action": "resume"})
+
+	// A key and a click on the demo's Start button, which print.
+	cursor := ok("game_output", map[string]any{"max_lines": 1})["next_since"]
+	ok("game_input", map[string]any{"key": "Space"})
+	ok("game_input", map[string]any{"mouse_button": "left", "position": []any{80, 80}})
+	time.Sleep(300 * time.Millisecond)
+	printed, _ := json.Marshal(ok("game_output", map[string]any{"since": cursor})["lines"])
+	for _, want := range []string{"Key: Space", "Start pressed"} {
+		if !strings.Contains(string(printed), want) {
+			t.Errorf("the game did not print %q after game_input: %s", want, printed)
+		}
+	}
+	fails("game_input", map[string]any{}, "INVALID_PARAMS")
+	fails("game_input", map[string]any{"action": "teleport"}, "no input action")
+	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
+	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
 	stop := ok("game_stop", nil)
 	if stop["stopped"] != true {
 		t.Errorf("game_stop = %v", stop)

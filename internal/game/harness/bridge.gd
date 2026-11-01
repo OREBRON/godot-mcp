@@ -28,6 +28,7 @@ func _ready() -> void:
 		"scene_tree": _scene_tree,
 		"node_get": _node_get,
 		"time": _time,
+		"input": _input_cmd,
 	}
 	_ws.outbound_buffer_size = 64 << 20 # screenshots
 	_ws.inbound_buffer_size = 1 << 20
@@ -107,6 +108,15 @@ func _int_param(params: Dictionary, key: String, fallback: int) -> int:
 	if raw is int:
 		var i: int = raw
 		return i
+	return fallback
+
+
+## Reads a number from the params.
+func _float_param(params: Dictionary, key: String, fallback: float) -> float:
+	var raw: Variant = params.get(key, fallback)
+	if raw is float or raw is int:
+		var f: float = raw
+		return f
 	return fallback
 
 
@@ -319,3 +329,145 @@ func _time(params: Dictionary) -> Variant:
 		"physics_ticks_per_second": Engine.physics_ticks_per_second,
 		"time_scale": Engine.time_scale,
 	}
+
+
+# ---- input ----
+
+const MOUSE_BUTTONS: Dictionary = {
+	"left": MOUSE_BUTTON_LEFT,
+	"right": MOUSE_BUTTON_RIGHT,
+	"middle": MOUSE_BUTTON_MIDDLE,
+	"wheel_up": MOUSE_BUTTON_WHEEL_UP,
+	"wheel_down": MOUSE_BUTTON_WHEEL_DOWN,
+}
+
+
+## Sends an action, a key, a mouse click or a mouse move. By default the
+## input is pressed, held for duration seconds and released; "pressed" sends
+## only one half, to hold an input across calls.
+func _input_cmd(params: Dictionary) -> Variant:
+	var action: String = str(params.get("action", ""))
+	var key: String = str(params.get("key", ""))
+	var button: String = str(params.get("mouse_button", ""))
+	var at: Variant = _vec2(params.get("position", null))
+	var kinds: int = int(not action.is_empty()) + int(not key.is_empty()) + int(not button.is_empty())
+	if kinds > 1 or (kinds == 0 and at == null):
+		return _fail("INVALID_PARAMS", "give exactly one of action, key or mouse_button (with position), or position alone to move the mouse")
+
+	var events: Array[InputEvent] = [] # the pressed event; the release is derived from it
+	var described: String = ""
+	if not action.is_empty():
+		if not InputMap.has_action(StringName(action)):
+			var custom: Array[String] = []
+			for a: StringName in InputMap.get_actions():
+				if not str(a).begins_with("ui_"):
+					custom.append(str(a))
+			return _fail("INVALID_PARAMS", "the project has no input action \"%s\"" % action, "its actions: %s, plus the built-in ui_* actions" % (", ".join(PackedStringArray(custom)) if not custom.is_empty() else "(none of its own)"))
+		var ev: InputEventAction = InputEventAction.new()
+		ev.action = StringName(action)
+		ev.strength = 1.0
+		events.append(ev)
+		described = "action %s" % action
+	elif not key.is_empty():
+		var ev: InputEventKey = _key_event(key)
+		if ev == null:
+			return _fail("INVALID_PARAMS", "unknown key \"%s\"" % key, "use Godot key names such as Space, Enter, Escape, Left, A, F1, optionally with modifiers: Ctrl+S, Shift+Tab")
+		events.append(ev)
+		described = "key %s" % key
+	elif not button.is_empty():
+		if not MOUSE_BUTTONS.has(button):
+			return _fail("INVALID_PARAMS", "unknown mouse_button \"%s\"" % button, "use left, right, middle, wheel_up or wheel_down")
+		if at == null:
+			return _fail("INVALID_PARAMS", "mouse_button needs position, as [x, y] in the game's viewport coordinates")
+		var ev: InputEventMouseButton = InputEventMouseButton.new()
+		var index: MouseButton = MOUSE_BUTTONS[button]
+		ev.button_index = index
+		ev.position = at
+		ev.global_position = at
+		events.append(ev)
+		described = "mouse %s at %s" % [button, at]
+
+	# Mouse input goes to the viewport directly, which reaches Controls that
+	# stop the mouse; Input.parse_input_event would not.
+	if at != null:
+		var motion: InputEventMouseMotion = InputEventMouseMotion.new()
+		motion.position = at
+		motion.global_position = at
+		get_viewport().push_input(motion, true)
+		if described.is_empty():
+			described = "mouse move to %s" % at
+	if events.is_empty():
+		return {"sent": described}
+
+	var pressed_raw: Variant = params.get("pressed", null)
+	if pressed_raw is bool:
+		var only: bool = pressed_raw
+		_dispatch(events[0], only)
+		return {"sent": "%s %s" % [described, "pressed" if only else "released"]}
+	_dispatch(events[0], true)
+	var hold: float = _float_param(params, "duration", 0.1)
+	if hold > 0.0:
+		# Real seconds, also while paused and whatever the time scale.
+		await get_tree().create_timer(hold, true, false, true).timeout
+	else:
+		await get_tree().process_frame
+	_dispatch(events[0], false)
+	return {"sent": "%s pressed and released" % described, "held_seconds": hold}
+
+
+func _dispatch(event: InputEvent, pressed: bool) -> void:
+	var ev: InputEvent = event.duplicate()
+	if ev is InputEventAction:
+		var a: InputEventAction = ev
+		a.pressed = pressed
+		Input.parse_input_event(a)
+	elif ev is InputEventKey:
+		var k: InputEventKey = ev
+		k.pressed = pressed
+		Input.parse_input_event(k)
+	elif ev is InputEventMouseButton:
+		var m: InputEventMouseButton = ev
+		m.pressed = pressed
+		get_viewport().push_input(m, true)
+
+
+## Builds a key event from "Space", "A", "Ctrl+Shift+S"; null if unknown.
+func _key_event(spec: String) -> InputEventKey:
+	var parts: PackedStringArray = spec.split("+")
+	var code: Key = OS.find_keycode_from_string(parts[parts.size() - 1].strip_edges())
+	if code == KEY_NONE:
+		return null
+	var ev: InputEventKey = InputEventKey.new()
+	ev.keycode = code
+	ev.physical_keycode = code
+	ev.key_label = code
+	for i: int in parts.size() - 1:
+		match parts[i].strip_edges().to_lower():
+			"ctrl", "control":
+				ev.ctrl_pressed = true
+			"shift":
+				ev.shift_pressed = true
+			"alt":
+				ev.alt_pressed = true
+			"meta", "cmd", "command":
+				ev.meta_pressed = true
+			_:
+				return null
+	return ev
+
+
+## [x, y] or {"x": x, "y": y} as a Vector2, or null.
+func _vec2(raw: Variant) -> Variant:
+	if raw is Array:
+		var a: Array = raw
+		if a.size() == 2 and (a[0] is float or a[0] is int) and (a[1] is float or a[1] is int):
+			var x: float = a[0]
+			var y: float = a[1]
+			return Vector2(x, y)
+	elif raw is Dictionary:
+		var d: Dictionary = raw
+		if d.has("x") and d.has("y"):
+			var x: float = d["x"]
+			var y: float = d["y"]
+			return Vector2(x, y)
+	return null

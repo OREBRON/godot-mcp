@@ -294,6 +294,24 @@ func (s *Server) addGameTools() {
 			"so what you read afterwards with game_node_get is the same on every run. Input sent while paused takes effect on the next step.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
 	}, "time", time.Minute)
+
+	addGameTool[gameInputIn](s, &mcp.Tool{
+		Name: "game_input",
+		Description: "Send input to the game started by game_run: an InputMap action, a key, a mouse click or a mouse move. " +
+			"Give exactly one of action, key, or mouse_button with position (position alone moves the mouse). " +
+			"By default the input is pressed, held for duration and released. Paused nodes receive no input: " +
+			"to watch input act frame by frame, send it with pressed true, call game_time step, then send pressed false.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
+	}, "input", time.Minute)
+}
+
+type gameInputIn struct {
+	Action      string    `json:"action,omitempty" jsonschema:"an InputMap action, e.g. \"jump\" or \"ui_accept\""`
+	Key         string    `json:"key,omitempty" jsonschema:"a key by Godot name, e.g. \"Space\", \"Enter\", \"A\", \"Ctrl+S\""`
+	MouseButton string    `json:"mouse_button,omitempty" jsonschema:"\"left\", \"right\", \"middle\", \"wheel_up\" or \"wheel_down\"; needs position"`
+	Position    []float64 `json:"position,omitempty" jsonschema:"[x, y] in the game's viewport coordinates; on its own it moves the mouse there"`
+	Duration    *float64  `json:"duration,omitempty" jsonschema:"seconds to hold before releasing (default 0.1)"`
+	Pressed     *bool     `json:"pressed,omitempty" jsonschema:"send only the press (true) or only the release (false), to hold an input across calls such as game_time steps"`
 }
 
 type gameTimeIn struct {
