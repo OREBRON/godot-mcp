@@ -326,6 +326,10 @@ func TestEndToEnd(t *testing.T) {
 	if st := run["status"].(map[string]any); st["bridge"] != "connected" {
 		t.Errorf("game_run status = %v, want bridge connected", st)
 	}
+	// A headless window is 64x64; the harness gives it the on-screen size.
+	if p := ok("game_node_get", map[string]any{"node_path": "/root", "properties": []any{"size"}})["properties"].(map[string]any); p["size"] != "Vector2i(1152, 648)" {
+		t.Errorf("headless game window size = %v, want the project's 1152x648", p["size"])
+	}
 	if issues, _ := json.Marshal(run["errors"]); string(issues) != "[]" && string(issues) != "null" {
 		t.Errorf("the harness run printed errors: %s", issues)
 	}

@@ -13,6 +13,16 @@ const Bridge: GDScript = preload("bridge.gd")
 
 func _ready() -> void:
 	var tree: SceneTree = get_tree()
+	if DisplayServer.get_name() == "headless":
+		# The headless window is 64x64. Give the game the size its window
+		# would have on screen, so the UI lays out, and clicks land, as they
+		# would there.
+		var width: int = ProjectSettings.get_setting("display/window/size/window_width_override", 0)
+		var height: int = ProjectSettings.get_setting("display/window/size/window_height_override", 0)
+		if width <= 0 or height <= 0:
+			width = ProjectSettings.get_setting("display/window/size/viewport_width", 1152)
+			height = ProjectSettings.get_setting("display/window/size/viewport_height", 648)
+		tree.root.size = Vector2i(width, height)
 	var bridge: Node = Bridge.new()
 	bridge.name = "GodotMCPBridge"
 	tree.root.add_child.call_deferred(bridge)
