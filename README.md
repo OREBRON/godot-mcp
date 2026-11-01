@@ -4,6 +4,7 @@ An MCP server that lets AI agents (Claude Code, Cursor, Codex, Claude Desktop, .
 
 - check GDScript with the project's own Godot,
 - run the game and read its errors,
+- look into the running game, send it input, pause it and step it frame by frame, and take screenshots of it,
 - inspect and edit the scene open in the editor. These edits go through the editor's undo history.
 
 The server is a single static binary for Linux, macOS and Windows (amd64 and arm64). Users don't need Node, Python or any other runtime.
@@ -13,7 +14,12 @@ MCP client (Claude Code, Cursor, ...)
    │ stdio
    ▼
 godot-mcp (Go binary)
-   ├── runs Godot headless itself: script_check, game_run, game_output, game_stop
+   ├── runs Godot itself: script_check, game_run, game_output, game_stop
+   │
+   ├── WebSocket on 127.0.0.1, token passed in the game's environment
+   │   ▲
+   │   └── the running game: a bridge node added by game_run's harness
+   │       └── game_scene_tree, game_node_get, game_input, game_time, game_screenshot
    │
    │ WebSocket on 127.0.0.1, token from <project>/.godot/godot_mcp/bridge.json
    ▼
@@ -21,7 +27,7 @@ addons/godot_mcp (editor plugin, GDScript)
    └── scene_*, node_* and editor_screenshot; edits are undoable with Ctrl+Z
 ```
 
-The plugin is the listener, so several agent sessions can share one open editor. The server spawns the game process itself and reads its stdout and stderr directly, instead of scraping the editor's Output panel.
+The plugin is the listener, so several agent sessions can share one open editor. The server spawns the game process itself and reads its stdout and stderr directly, instead of scraping the editor's Output panel. The game dials back to the server, so the `game_*` tools need neither the editor nor the plugin.
 
 ## Requirements
 
@@ -65,6 +71,11 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `game_run` | no | Runs the project or one scene, optionally headless. Returns the first output and parsed errors. |
 | `game_output` | no | Reads more output using a cursor (`next_since`). `errors_only` returns just the errors. |
 | `game_stop` | no | Stops the game and every process it started. |
+| `game_scene_tree` | no | Live node tree of the running game, runtime nodes included. Absolute paths such as `/root/Game` reach autoloads. |
+| `game_node_get` | no | Live properties and script variables of a node in the running game. |
+| `game_input` | no | Sends an InputMap action, a key, a mouse click or a mouse move. Pressed and released by default; `pressed` sends one half to hold an input. |
+| `game_time` | no | Pauses, resumes, or steps exactly N physics frames and pauses again, for checks that come out the same every run. |
+| `game_screenshot` | no (windowed game) | PNG of the game's current frame, with the logical size `game_input` positions use. |
 | `scene_tree` | yes | Node tree of the edited scene: names, classes, scripts and instanced scenes. |
 | `node_get` | yes | Properties of a node. By default only the ones that differ from their defaults. |
 | `scene_open` / `scene_create` / `scene_save` | yes | Opens, creates and saves scenes. |
@@ -82,6 +93,10 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
   - With the editor connected, it asks the editor to rescan (the editor owns `.godot/`).
   - Without the editor, it runs `godot --import`, and only when a `class_name` script changed.
 - **No undo tool.** Godot does not give plugins the editor's own undo and redo, and calling the history's `UndoRedo` directly gets the editor's undo stack out of step, so the next Ctrl+Z undoes the wrong action. MCP edits stay in the editor's history, so the user can undo them with Ctrl+Z; an agent reverts its own change by making the opposite one.
+- **The game_* tools add nothing to the project.** `game_run` writes a small harness scene and a bridge script into `.godot/godot_mcp/run/` (which Godot does not import and the default `.gitignore` excludes) and launches the harness instead of the requested scene. The harness adds the bridge to the root and changes to the real scene, so the game runs as it would on its own: the scene is the current scene and survives `change_scene_to_*` like any other. The server listens on a random `127.0.0.1` port for each run and passes the port and a token in the game's environment, so a game started any other way, an export included, never starts a bridge.
+- **The bridge compiles with the project's warning settings.** A project may turn any GDScript warning into an error, and the bridge is compiled inside it, so it is written to raise none; a test compiles it with every warning Godot has set to error.
+- **Headless games get their real window size.** The headless display server makes a 64x64 window; the harness sizes it like the window on screen, so the UI lays out the same and clicks land where they would.
+- **Frame-exact checks.** `game_time step` waits for one more `physics_frame` signal than the frames asked for, because the signal comes before the nodes' `_physics_process`; pausing then stops the next frame. Hold an input with `game_input` `pressed: true`, step, release, and the result is the same every run.
 - **One writer per project.** Scene edits go through the open editor. Writing a `.tscn` by hand while the editor has it open loses changes on the editor's next save.
 - **Paths are portable.** The server converts every path to a `res://` path. It refuses paths that leave the project, including through `..\` (Godot reads `\` as a separator on every OS) and through symbolic links or junctions that point outside. It also refuses wrong letter case: a misspelled path works on macOS and Windows but breaks on Linux and in exported `.pck` files.
 - **Process trees.** On Unix the game runs in its own process group. On Windows the server uses `taskkill /T`, because killing a parent there leaves its children running. `taskkill /T` only finds children while the game itself is still running. A process the game started that outlives it is not stopped on Windows; a Job Object would cover that and is not implemented yet.
@@ -94,9 +109,9 @@ Errors carry a stable `code` plus a `hint` that says what to do next. For exampl
 ## Development
 
 ```bash
-go test -short ./...                                   # unit tests, no Godot needed
-go test ./e2e/                                         # real binary + headless Godot editor
-GODOT_MCP_E2E_WINDOWED=1 go test ./e2e/ -run Screenshot # opens an editor window
+go test -short ./...                                    # unit tests, no Godot needed
+go test ./e2e/                                          # real binary + headless Godot editor and game
+GODOT_MCP_E2E_WINDOWED=1 go test ./e2e/ -run Screenshot # opens an editor window and a game window
 ```
 
 The repository root is also a Godot project (`project.godot`, `demo/`) for working on the plugin. Go folders carry `.gdignore`, so the Godot editor skips them. The `export-ignore` rules in `.gitattributes` keep everything except `addons/godot_mcp/` out of Asset Library downloads.
@@ -147,7 +162,7 @@ Two safety measures:
 
 ## Roadmap
 
-- Running-game bridge: screenshots, input injection and a live scene tree for the running game. This needs an `EditorDebuggerPlugin` in the editor and a small autoload in the game that talks over `EngineDebugger` messages.
+- Setting properties in the running game, for checks such as "teleport the player next to the door".
 - An editor dock with a **Configure** button that downloads the right binary and writes the client configuration.
 - Publishing on the Godot Asset Library, Homebrew, Scoop and winget.
 - Signed and notarized binaries for macOS and Windows.
