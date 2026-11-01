@@ -27,6 +27,7 @@ func _ready() -> void:
 		"ping": _ping,
 		"scene_tree": _scene_tree,
 		"node_get": _node_get,
+		"time": _time,
 	}
 	_ws.outbound_buffer_size = 64 << 20 # screenshots
 	_ws.inbound_buffer_size = 1 << 20
@@ -284,3 +285,37 @@ func _encode(v: Variant) -> Variant:
 	if text.length() > MAX_TEXT:
 		return text.substr(0, MAX_TEXT) + "... (%d characters, cut)" % text.length()
 	return text
+
+
+# ---- time ----
+
+## Pauses, resumes or steps the game. The bridge keeps running while the
+## tree is paused (PROCESS_MODE_ALWAYS), so it can always answer.
+func _time(params: Dictionary) -> Variant:
+	var tree: SceneTree = get_tree()
+	var action: String = str(params.get("action", "status"))
+	var stepped: int = 0
+	match action:
+		"pause":
+			tree.paused = true
+		"resume":
+			tree.paused = false
+		"step":
+			stepped = clampi(_int_param(params, "frames", 1), 1, 600)
+			tree.paused = false
+			# physics_frame is emitted before the nodes' _physics_process, so
+			# after the (n+1)-th signal exactly n frames have run, and pausing
+			# here stops the next one.
+			for i: int in stepped + 1:
+				await tree.physics_frame
+			tree.paused = true
+		"status":
+			pass
+		_:
+			return _fail("INVALID_PARAMS", "unknown action \"%s\"" % action, "use pause, resume, step or status")
+	return {
+		"paused": tree.paused,
+		"stepped_frames": stepped,
+		"physics_ticks_per_second": Engine.physics_ticks_per_second,
+		"time_scale": Engine.time_scale,
+	}

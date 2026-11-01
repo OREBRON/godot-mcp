@@ -169,8 +169,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 16 {
-		t.Errorf("got %d tools, want 16", len(tools.Tools))
+	if len(tools.Tools) != 17 {
+		t.Errorf("got %d tools, want 17", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -351,6 +351,28 @@ func TestEndToEnd(t *testing.T) {
 	}
 	fails("game_node_get", map[string]any{"node_path": "Nope"}, "NODE_NOT_FOUND")
 	fails("game_node_get", map[string]any{"node_path": "Player", "properties": []any{"positon"}}, "PROPERTY_NOT_FOUND")
+
+	// Pause holds the game still; step runs exactly the frames asked for.
+	ticks := func() float64 {
+		t.Helper()
+		return ok("game_node_get", map[string]any{"node_path": ".", "properties": []any{"ticks"}})["properties"].(map[string]any)["ticks"].(float64)
+	}
+	if r := ok("game_time", map[string]any{"action": "pause"}); r["paused"] != true {
+		t.Errorf("pause = %v", r)
+	}
+	before := ticks()
+	time.Sleep(300 * time.Millisecond)
+	if after := ticks(); after != before {
+		t.Errorf("ticks moved while paused: %v -> %v", before, after)
+	}
+	if r := ok("game_time", map[string]any{"action": "step", "frames": 10}); r["paused"] != true || r["stepped_frames"] != 10.0 {
+		t.Errorf("step = %v", r)
+	}
+	if after := ticks(); after != before+10 {
+		t.Errorf("step 10 moved ticks from %v to %v", before, after)
+	}
+	fails("game_time", map[string]any{"action": "rewind"}, "INVALID_PARAMS")
+	ok("game_time", map[string]any{"action": "resume"})
 	stop := ok("game_stop", nil)
 	if stop["stopped"] != true {
 		t.Errorf("game_stop = %v", stop)

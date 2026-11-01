@@ -287,6 +287,18 @@ func (s *Server) addGameTools() {
 			"Without properties, returns the stored properties and script variables that differ from their defaults.",
 		Annotations: readOnly,
 	}, "node_get", 15*time.Second)
+
+	addGameTool[gameTimeIn](s, &mcp.Tool{
+		Name: "game_time",
+		Description: "Pause, resume or step the game started by game_run. step runs exactly the given number of physics frames and pauses again, " +
+			"so what you read afterwards with game_node_get is the same on every run. Input sent while paused takes effect on the next step.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
+	}, "time", time.Minute)
+}
+
+type gameTimeIn struct {
+	Action string `json:"action" jsonschema:"\"pause\" freezes the game, \"resume\" lets it run, \"step\" runs exactly frames physics frames and pauses again, \"status\" only reports"`
+	Frames int    `json:"frames,omitempty" jsonschema:"physics frames to run for step (default 1, at most 600)"`
 }
 
 type gameSceneTreeIn struct {
