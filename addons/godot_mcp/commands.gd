@@ -8,6 +8,7 @@ const Codec := preload("res://addons/godot_mcp/variant_codec.gd")
 const ProjectCommands := preload("res://addons/godot_mcp/project_commands.gd")
 
 const MAX_TREE_NODES := 500
+const DRAW_TIMEOUT_MS := 5000
 
 var _plugin: EditorPlugin
 var _handlers := {}
@@ -65,6 +66,20 @@ func _is_error(v: Variant) -> bool:
 func _frames(n: int) -> void:
 	for i in n:
 		await _plugin.get_tree().process_frame
+
+
+## Waits for a drawn frame. A minimised or hidden window draws none, and
+## waiting for frame_post_draw alone would stall every later command.
+func _drawn() -> bool:
+	var drawn := [false]
+	var mark := func() -> void: drawn[0] = true
+	RenderingServer.frame_post_draw.connect(mark, CONNECT_ONE_SHOT)
+	var start := Time.get_ticks_msec()
+	while not drawn[0] and Time.get_ticks_msec() - start < DRAW_TIMEOUT_MS:
+		await _frames(1)
+	if RenderingServer.frame_post_draw.is_connected(mark):
+		RenderingServer.frame_post_draw.disconnect(mark)
+	return drawn[0]
 
 
 # ---- lookups ----
@@ -761,7 +776,8 @@ func _editor_screenshot(p: Dictionary) -> Dictionary:
 	# A viewport only renders while its main screen is shown.
 	EditorInterface.set_main_screen_editor("3D" if which == "3d" else "2D")
 	await _frames(2)
-	await RenderingServer.frame_post_draw
+	if not await _drawn():
+		return _fail("NOT_DRAWING", "the editor window drew no frame within %d ms" % DRAW_TIMEOUT_MS, "bring the editor window to the front; a minimised or hidden window draws nothing")
 	var vp: SubViewport = EditorInterface.get_editor_viewport_3d(0) if which == "3d" else EditorInterface.get_editor_viewport_2d()
 	var img := vp.get_texture().get_image()
 	if img == null or img.is_empty():

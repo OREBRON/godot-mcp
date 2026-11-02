@@ -6,6 +6,7 @@ extends Node
 
 const PROTOCOL: int = 1
 const MAX_TREE_NODES: int = 500
+const DRAW_TIMEOUT_MS: int = 5000
 const MAX_TEXT: int = 4000
 
 var _ws: WebSocketPeer = WebSocketPeer.new()
@@ -618,10 +619,28 @@ func _vec2(raw: Variant) -> Variant:
 ## The game's frame as a PNG, scaled down to max_width. Also reports the
 ## viewport's logical size, the coordinate space game_input uses: on a HiDPI
 ## screen the image has more pixels than that.
+## Waits for a drawn frame. A minimised or hidden window draws none, and
+## waiting for frame_post_draw alone would never return.
+func _drawn() -> bool:
+	var drawn: Array[bool] = [false]
+	var mark: Callable = func() -> void: drawn[0] = true
+	var err: int = RenderingServer.frame_post_draw.connect(mark, CONNECT_ONE_SHOT)
+	if err != OK:
+		return false
+	var start: int = Time.get_ticks_msec()
+	while not drawn[0] and Time.get_ticks_msec() - start < DRAW_TIMEOUT_MS:
+		await get_tree().process_frame
+	if RenderingServer.frame_post_draw.is_connected(mark):
+		RenderingServer.frame_post_draw.disconnect(mark)
+	return drawn[0]
+
+
 func _screenshot(params: Dictionary) -> Variant:
 	if DisplayServer.get_name() == "headless":
 		return _fail("NOT_AVAILABLE_HEADLESS", "the game runs headless and draws nothing", "stop it and start it again with game_run without headless")
-	await RenderingServer.frame_post_draw
+	var drawn: bool = await _drawn()
+	if not drawn:
+		return _fail("NOT_DRAWING", "the game window drew no frame within %d ms" % DRAW_TIMEOUT_MS, "bring the game window to the front; a minimised or hidden window draws nothing")
 	var vp: Viewport = get_viewport()
 	var img: Image = vp.get_texture().get_image()
 	if img == null or img.is_empty():

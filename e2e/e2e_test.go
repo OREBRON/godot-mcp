@@ -659,7 +659,7 @@ func TestGameScreenshot(t *testing.T) {
 	}
 	res := s.result("game_screenshot", map[string]any{"max_width": 800})
 	if res.IsError || len(res.Content) != 2 {
-		t.Fatalf("game_screenshot = %+v", res.Content)
+		t.Fatalf("game_screenshot = %+v", res.Content[0])
 	}
 	img := res.Content[0].(*mcp.ImageContent)
 	decoded, err := png.Decode(bytes.NewReader(img.Data))
