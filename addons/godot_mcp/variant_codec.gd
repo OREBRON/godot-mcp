@@ -45,71 +45,82 @@ static func encode(v: Variant) -> Variant:
 ## Converts a JSON value for a property. info is the property's entry from
 ## get_property_list(). Returns {"value": v} or {"error": message}. current
 ## is the property's present value, used for examples in error messages.
+## Each converter below returns {} when the value is not its kind.
 static func decode(value: Variant, info: Dictionary, current: Variant) -> Dictionary:
-	var type: int = info.get("type", TYPE_NIL)
 	if value == null:
 		return {"value": null}
+	var type: int = info.get("type", TYPE_NIL)
+	if type == TYPE_OBJECT:
+		return _decode_object(value, info)
+	var out := _decode_simple(value, type)
+	if out.is_empty():
+		out = _decode_container(value, type, current)
+	if out.is_empty():
+		out = _decode_text(value, type)
+	if out.is_empty():
+		var example: String = var_to_str(current) if current != null else type_string(type) + "(...)"
+		out = {"error": "expected %s, e.g. %s; got %s" % [type_string(type), example, JSON.stringify(value)]}
+	return out
+
+
+static func _decode_simple(value: Variant, type: int) -> Dictionary:
 	match type:
 		TYPE_NIL:
 			return {"value": value}
-		TYPE_BOOL:
-			if value is bool:
-				return {"value": value}
-			if value is String and value.to_lower() in ["true", "false"]:
-				return {"value": value.to_lower() == "true"}
-		TYPE_INT:
-			if value is float or value is int:
-				return {"value": int(value)}
-			if value is String and value.is_valid_int():
-				return {"value": value.to_int()}
-		TYPE_FLOAT:
-			if value is float or value is int:
-				return {"value": float(value)}
-			if value is String and value.is_valid_float():
-				return {"value": value.to_float()}
 		TYPE_STRING:
 			return {"value": str(value)}
 		TYPE_STRING_NAME:
 			return {"value": StringName(str(value))}
 		TYPE_NODE_PATH:
 			return {"value": NodePath(str(value))}
-		TYPE_OBJECT:
-			if value is String:
-				if value.is_empty():
-					return {"value": null}
-				if value.begins_with("res://") or value.begins_with("uid://"):
-					var path := to_res_path(value)
-					var problem := check_res_path(path)
-					if not problem.is_empty():
-						return {"error": problem}
-					if not ResourceLoader.exists(path):
-						return {"error": "%s does not exist" % value}
-					var res := load(path)
-					if res == null:
-						return {"error": "%s could not be loaded; check it with script_check if it is a script" % value}
-					# Godot would quietly store null for a resource of the wrong class.
-					var mismatch := _class_mismatch(res, info)
-					if not mismatch.is_empty():
-						return {"error": mismatch}
-					return {"value": res}
-			return {"error": "expected a res:// path to a resource or script, or null"}
+		TYPE_BOOL:
+			return _decode_bool(value)
+		TYPE_INT, TYPE_FLOAT:
+			return _decode_number(value, type)
 		TYPE_COLOR:
-			var c = _color(value)
-			if c != null:
-				return {"value": c}
+			return _wrap(_color(value))
 		TYPE_VECTOR2, TYPE_VECTOR2I, TYPE_VECTOR3, TYPE_VECTOR3I, TYPE_VECTOR4, TYPE_VECTOR4I:
-			var vec = _vector(value, type)
-			if vec != null:
-				return {"value": vec}
-		TYPE_ARRAY:
-			if value is Array:
-				if current is Array and current.is_typed():
-					return {"value": Array(value, current.get_typed_builtin(), current.get_typed_class_name(), current.get_typed_script())}
-				return {"value": value}
-		TYPE_DICTIONARY:
-			if value is Dictionary:
-				return {"value": value}
-	# Anything else: Godot's text form, e.g. "Rect2(0, 0, 16, 16)".
+			return _wrap(_vector(value, type))
+	return {}
+
+
+static func _wrap(v: Variant) -> Dictionary:
+	return {} if v == null else {"value": v}
+
+
+static func _decode_bool(value: Variant) -> Dictionary:
+	if value is bool:
+		return {"value": value}
+	if value is String and value.to_lower() in ["true", "false"]:
+		return {"value": value.to_lower() == "true"}
+	return {}
+
+
+static func _decode_number(value: Variant, type: int) -> Dictionary:
+	var n = value
+	if value is String:
+		var valid: bool = value.is_valid_int() if type == TYPE_INT else value.is_valid_float()
+		if not valid:
+			return {}
+		n = value.to_float()
+	if not (n is float or n is int):
+		return {}
+	return {"value": int(n) if type == TYPE_INT else float(n)}
+
+
+static func _decode_container(value: Variant, type: int, current: Variant) -> Dictionary:
+	if type == TYPE_DICTIONARY and value is Dictionary:
+		return {"value": value}
+	if type != TYPE_ARRAY or not (value is Array):
+		return {}
+	if current is Array and current.is_typed():
+		return {"value": Array(value, current.get_typed_builtin(), current.get_typed_class_name(), current.get_typed_script())}
+	return {"value": value}
+
+
+## Godot's text form, e.g. "Rect2(0, 0, 16, 16)", or a JSON array for a
+## packed array.
+static func _decode_text(value: Variant, type: int) -> Dictionary:
 	if value is String:
 		var parsed = str_to_var(value)
 		if typeof(parsed) == type:
@@ -118,8 +129,30 @@ static func decode(value: Variant, info: Dictionary, current: Variant) -> Dictio
 		var converted = type_convert(value, type)
 		if typeof(converted) == type:
 			return {"value": converted}
-	var example: String = var_to_str(current) if current != null else type_string(type) + "(...)"
-	return {"error": "expected %s, e.g. %s; got %s" % [type_string(type), example, JSON.stringify(value)]}
+	return {}
+
+
+static func _decode_object(value: Variant, info: Dictionary) -> Dictionary:
+	if value is String and value.is_empty():
+		return {"value": null}
+	if value is String and (value.begins_with("res://") or value.begins_with("uid://")):
+		return _load_resource(value, info)
+	return {"error": "expected a res:// path to a resource or script, or null"}
+
+
+static func _load_resource(value: String, info: Dictionary) -> Dictionary:
+	var path := to_res_path(value)
+	var problem := check_res_path(path)
+	if problem.is_empty() and not ResourceLoader.exists(path):
+		problem = "%s does not exist" % value
+	if not problem.is_empty():
+		return {"error": problem}
+	var res := load(path)
+	if res == null:
+		return {"error": "%s could not be loaded; check it with script_check if it is a script" % value}
+	# Godot would quietly store null for a resource of the wrong class.
+	var mismatch := _class_mismatch(res, info)
+	return {"error": mismatch} if not mismatch.is_empty() else {"value": res}
 
 
 ## Returns why res cannot go into the property described by info, or "".
