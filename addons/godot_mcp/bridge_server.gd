@@ -37,6 +37,15 @@ func stop() -> void:
 ## Accepts new connections, handles auth and returns up to max_requests
 ## authenticated requests as [peer_id, message] pairs.
 func poll(hello: Callable, max_requests: int) -> Array:
+	_accept_new()
+	var requests := []
+	for id in _peers.keys():
+		if _keep_alive(id):
+			_read_requests(id, hello, max_requests, requests)
+	return requests
+
+
+func _accept_new() -> void:
 	while _server.is_connection_available():
 		var ws := WebSocketPeer.new()
 		ws.inbound_buffer_size = 1 << 20
@@ -45,34 +54,41 @@ func poll(hello: Callable, max_requests: int) -> Array:
 			_peers[_next_id] = {"ws": ws, "authed": false, "since": Time.get_ticks_msec()}
 			_next_id += 1
 
-	var requests := []
-	for id in _peers.keys():
-		var peer: Dictionary = _peers[id]
-		var ws: WebSocketPeer = peer.ws
-		ws.poll()
-		var state := ws.get_ready_state()
-		if state == WebSocketPeer.STATE_CLOSED:
-			_peers.erase(id)
+
+## Polls a peer and drops it when it closed or failed to authenticate in
+## time. Returns whether it is open and may send requests.
+func _keep_alive(id: int) -> bool:
+	var peer: Dictionary = _peers[id]
+	var ws: WebSocketPeer = peer.ws
+	ws.poll()
+	var state := ws.get_ready_state()
+	if state == WebSocketPeer.STATE_CLOSED:
+		_peers.erase(id)
+		return false
+	if not peer.authed and Time.get_ticks_msec() - int(peer.since) > AUTH_TIMEOUT_MS:
+		if peer.get("closing", false):
+			_peers.erase(id) # gave it a full timeout to close cleanly
+		else:
+			ws.close(4001, "no auth")
+			peer.closing = true
+			peer.since = Time.get_ticks_msec()
+		return false
+	return state == WebSocketPeer.STATE_OPEN and not peer.get("closing", false)
+
+
+## Appends the peer's requests as [id, message]; the first message of a
+## peer that is not authenticated yet is its auth.
+func _read_requests(id: int, hello: Callable, max_requests: int, requests: Array) -> void:
+	var peer: Dictionary = _peers[id]
+	var ws: WebSocketPeer = peer.ws
+	while not peer.get("closing", false) and ws.get_available_packet_count() > 0 and requests.size() < max_requests:
+		var msg = JSON.parse_string(ws.get_packet().get_string_from_utf8())
+		if typeof(msg) != TYPE_DICTIONARY:
 			continue
-		if not peer.authed and Time.get_ticks_msec() - int(peer.since) > AUTH_TIMEOUT_MS:
-			if peer.get("closing", false):
-				_peers.erase(id) # gave it a full timeout to close cleanly
-			else:
-				ws.close(4001, "no auth")
-				peer.closing = true
-				peer.since = Time.get_ticks_msec()
-			continue
-		if state != WebSocketPeer.STATE_OPEN:
-			continue
-		while not peer.get("closing", false) and ws.get_available_packet_count() > 0 and requests.size() < max_requests:
-			var msg = JSON.parse_string(ws.get_packet().get_string_from_utf8())
-			if typeof(msg) != TYPE_DICTIONARY:
-				continue
-			if peer.authed:
-				requests.append([id, msg])
-			else:
-				_authenticate(id, peer, msg, hello)
-	return requests
+		if peer.authed:
+			requests.append([id, msg])
+		else:
+			_authenticate(id, peer, msg, hello)
 
 
 func _authenticate(id: int, peer: Dictionary, msg: Dictionary, hello: Callable) -> void:

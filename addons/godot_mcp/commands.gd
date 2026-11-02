@@ -145,25 +145,30 @@ func _similar_properties(obj: Object, name: String) -> String:
 ## Creates a node of a built-in class or a class_name script class.
 func _instantiate_type(type: String) -> Variant:
 	if ClassDB.class_exists(type):
-		if not ClassDB.is_parent_class(type, "Node"):
-			return _fail("INVALID_TYPE", "%s is not a Node class" % type, "resources such as shapes and materials are not nodes: save them as .tres and set them on a node property with their res:// path")
-		if not ClassDB.can_instantiate(type):
-			return _fail("INVALID_TYPE", "%s is abstract and cannot be created" % type, "pick one of its subclasses: %s" % ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 10)))
-		return ClassDB.instantiate(type)
+		return _instantiate_builtin(type)
 	for g in ProjectSettings.get_global_class_list():
 		if g["class"] == type:
-			var script := load(g["path"]) as Script
-			if script == null or not script.can_instantiate():
-				return _fail("INVALID_TYPE", "the script class %s (%s) cannot be instantiated" % [type, g["path"]], "run script_check on it")
-			var obj = script.new()
-			if not (obj is Node):
-				return _fail("INVALID_TYPE", "the script class %s does not extend Node" % type)
-			return obj
-	var close := []
-	for c in ClassDB.get_inheriters_from_class("Node"):
-		if c.similarity(type) > 0.6 or c.to_lower() == type.to_lower():
-			close.append(c)
+			return _instantiate_script_class(type, g["path"])
+	var close := Array(ClassDB.get_inheriters_from_class("Node")).filter(func(c: String) -> bool: return c.similarity(type) > 0.6 or c.to_lower() == type.to_lower())
 	return _fail("INVALID_TYPE", "unknown class \"%s\"" % type, ("did you mean: %s" % ", ".join(close.slice(0, 5))) if not close.is_empty() else "use a built-in class such as Node2D or Sprite2D, or a class_name from your scripts")
+
+
+func _instantiate_builtin(type: String) -> Variant:
+	if not ClassDB.is_parent_class(type, "Node"):
+		return _fail("INVALID_TYPE", "%s is not a Node class" % type, "resources such as shapes and materials are not nodes: set them on a node property, e.g. {\"shape\": {\"type\": \"RectangleShape2D\"}}")
+	if not ClassDB.can_instantiate(type):
+		return _fail("INVALID_TYPE", "%s is abstract and cannot be created" % type, "pick one of its subclasses: %s" % ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 10)))
+	return ClassDB.instantiate(type)
+
+
+func _instantiate_script_class(type: String, path: String) -> Variant:
+	var script := load(path) as Script
+	if script == null or not script.can_instantiate():
+		return _fail("INVALID_TYPE", "the script class %s (%s) cannot be instantiated" % [type, path], "run script_check on it")
+	var obj = script.new()
+	if not (obj is Node):
+		return _fail("INVALID_TYPE", "the script class %s does not extend Node" % type)
+	return obj
 
 
 ## Converts and checks every property first, so that a bad value changes
@@ -257,32 +262,42 @@ func _node_get(p: Dictionary) -> Dictionary:
 	var node = _resolve(str(p.get("node_path", ".")))
 	if _is_error(node):
 		return node
-	var out := {}
 	var wanted: Array = p.get("properties", []) if p.get("properties") is Array else []
-	if wanted.is_empty():
-		var include_defaults := bool(p.get("include_defaults", false))
-		var script: Script = node.get_script()
-		for info in node.get_property_list():
-			if not (info.usage & PROPERTY_USAGE_STORAGE):
-				continue
-			var value = node.get(info.name)
-			if not include_defaults:
-				var def = ClassDB.class_get_property_default_value(node.get_class(), info.name)
-				if script != null and def == null:
-					def = script.get_property_default_value(info.name)
-				if typeof(value) == typeof(def) and value == def:
-					continue
-				if value == null and def == null:
-					continue
-			out[info.name] = Codec.encode(value)
-	else:
-		for key in wanted:
-			var name := str(key)
-			if Codec.property_info(node, name).is_empty():
-				var similar := _similar_properties(node, name.get_slice(":", 0))
-				return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "")
-			out[name] = Codec.encode(node.get_indexed(NodePath(name)))
+	var out := _stored_properties(node, bool(p.get("include_defaults", false))) if wanted.is_empty() else _listed_properties(node, wanted)
+	if _is_error(out):
+		return out
 	return {"scene": _root().scene_file_path, "path": _rel(node), "type": node.get_class(), "properties": out}
+
+
+## Stored properties, by default only those that differ from their defaults.
+func _stored_properties(node: Node, include_defaults: bool) -> Dictionary:
+	var out := {}
+	for info in node.get_property_list():
+		if not (info.usage & PROPERTY_USAGE_STORAGE):
+			continue
+		var value = node.get(info.name)
+		if include_defaults or not _is_default(node, info.name, value):
+			out[info.name] = Codec.encode(value)
+	return out
+
+
+func _is_default(node: Node, prop: String, value: Variant) -> bool:
+	var def = ClassDB.class_get_property_default_value(node.get_class(), prop)
+	var script: Script = node.get_script()
+	if script != null and def == null:
+		def = script.get_property_default_value(prop)
+	return (typeof(value) == typeof(def) and value == def) or (value == null and def == null)
+
+
+func _listed_properties(node: Node, wanted: Array) -> Dictionary:
+	var out := {}
+	for key in wanted:
+		var name := str(key)
+		if Codec.property_info(node, name).is_empty():
+			var similar := _similar_properties(node, name.get_slice(":", 0))
+			return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "")
+		out[name] = Codec.encode(node.get_indexed(NodePath(name)))
+	return out
 
 
 func _scene_open(p: Dictionary) -> Dictionary:
@@ -398,44 +413,14 @@ func _node_add(p: Dictionary) -> Dictionary:
 	var foreign = _check_editable(parent, false)
 	if foreign != null:
 		return foreign
+	var node = _new_node(p)
+	if _is_error(node):
+		return node
+	var problem = _configure_new_node(node, p)
+	if problem != null:
+		node.free()
+		return problem
 	var root := _root()
-	var type := str(p.get("type", ""))
-	var scene_path := str(p.get("scene", ""))
-	if type.is_empty() == scene_path.is_empty():
-		return _fail("INVALID_PARAMS", "give exactly one of type or scene")
-	var node: Node
-	if not scene_path.is_empty():
-		if scene_path == root.scene_file_path:
-			return _fail("INVALID_PARAMS", "a scene cannot contain an instance of itself")
-		if not ResourceLoader.exists(scene_path):
-			return _fail("FILE_NOT_FOUND", "%s does not exist" % scene_path)
-		var packed := load(scene_path) as PackedScene
-		if packed == null:
-			return _fail("INVALID_SCENE", "%s is not a scene" % scene_path)
-		# Keep the link to the source scene, as dragging it into the editor does.
-		node = packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
-	else:
-		var created = _instantiate_type(type)
-		if _is_error(created):
-			return created
-		node = created
-	var wanted_name := str(p.get("name", ""))
-	if not wanted_name.is_empty():
-		if not wanted_name.validate_node_name() == wanted_name:
-			node.free()
-			return _fail("INVALID_PARAMS", "\"%s\" is not a valid node name" % wanted_name, "names cannot contain . : @ / \" %")
-		node.name = wanted_name
-	elif not scene_path.is_empty():
-		node.name = scene_path.get_file().get_basename().to_pascal_case()
-	var props = p.get("properties", {})
-	if props is Dictionary and not props.is_empty():
-		var changes = _prepare_changes(node, props)
-		if _is_error(changes):
-			node.free()
-			return changes
-		for c in changes:
-			node.set_indexed(c[0], c[2])
-
 	var ur := _plugin.get_undo_redo()
 	ur.create_action("MCP: add %s" % node.name)
 	ur.add_do_method(parent, "add_child", node, true)
@@ -444,6 +429,49 @@ func _node_add(p: Dictionary) -> Dictionary:
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
 	return {"scene": root.scene_file_path, "path": _rel(node), "name": str(node.name), "type": node.get_class()}
+
+
+## A node of the given type, or an instance of the given scene.
+func _new_node(p: Dictionary) -> Variant:
+	var type := str(p.get("type", ""))
+	var scene_path := str(p.get("scene", ""))
+	if type.is_empty() == scene_path.is_empty():
+		return _fail("INVALID_PARAMS", "give exactly one of type or scene")
+	if type.is_empty():
+		return _instance(scene_path)
+	return _instantiate_type(type)
+
+
+func _instance(scene_path: String) -> Variant:
+	if scene_path == _root().scene_file_path:
+		return _fail("INVALID_PARAMS", "a scene cannot contain an instance of itself")
+	if not ResourceLoader.exists(scene_path):
+		return _fail("FILE_NOT_FOUND", "%s does not exist" % scene_path)
+	var packed := load(scene_path) as PackedScene
+	if packed == null:
+		return _fail("INVALID_SCENE", "%s is not a scene" % scene_path)
+	# Keep the link to the source scene, as dragging it into the editor does.
+	var node := packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+	node.name = scene_path.get_file().get_basename().to_pascal_case()
+	return node
+
+
+## Names the new node and sets its properties; returns an error or null.
+func _configure_new_node(node: Node, p: Dictionary) -> Variant:
+	var wanted_name := str(p.get("name", ""))
+	if not wanted_name.is_empty() and wanted_name.validate_node_name() != wanted_name:
+		return _fail("INVALID_PARAMS", "\"%s\" is not a valid node name" % wanted_name, "names cannot contain . : @ / \" %")
+	if not wanted_name.is_empty():
+		node.name = wanted_name
+	var props = p.get("properties", {})
+	if not (props is Dictionary) or props.is_empty():
+		return null
+	var changes = _prepare_changes(node, props)
+	if _is_error(changes):
+		return changes
+	for c in changes:
+		node.set_indexed(c[0], c[2])
+	return null
 
 
 func _node_set_properties(p: Dictionary) -> Dictionary:

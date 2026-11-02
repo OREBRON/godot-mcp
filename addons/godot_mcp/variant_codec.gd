@@ -15,23 +15,9 @@ static func encode(v: Variant, depth := 0) -> Variant:
 		TYPE_STRING_NAME, TYPE_NODE_PATH:
 			return str(v)
 		TYPE_OBJECT:
-			if not is_instance_valid(v):
-				return null
-			if v is InputEvent:
-				return v.as_text()
-			if v is Resource:
-				var path: String = v.resource_path
-				if not path.is_empty() and not path.contains("::"):
-					return path
-				return _encode_embedded(v, depth)
-			if v is Node:
-				return "<Node %s>" % v.name
-			return "<%s>" % v.get_class()
+			return _encode_object(v, depth)
 		TYPE_ARRAY:
-			var out := []
-			for e in v:
-				out.append(encode(e, depth))
-			return out
+			return v.map(func(e: Variant) -> Variant: return encode(e, depth))
 		TYPE_DICTIONARY:
 			var out := {}
 			for k in v:
@@ -41,6 +27,21 @@ static func encode(v: Variant, depth := 0) -> Variant:
 	if text.length() > MAX_TEXT:
 		return text.substr(0, MAX_TEXT) + "... (%d characters, truncated)" % text.length()
 	return text
+
+
+static func _encode_object(v: Variant, depth: int) -> Variant:
+	if not is_instance_valid(v):
+		return null
+	if v is InputEvent:
+		return v.as_text()
+	if v is Resource:
+		var path: String = v.resource_path
+		if not path.is_empty() and not path.contains("::"):
+			return path
+		return _encode_embedded(v, depth)
+	if v is Node:
+		return "<Node %s>" % v.name
+	return "<%s>" % v.get_class()
 
 
 ## A resource stored inside the scene, in the form decode() accepts back:
