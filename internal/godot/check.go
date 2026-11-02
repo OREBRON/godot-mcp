@@ -122,30 +122,11 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 	if len(scripts) == 0 {
 		return CheckResult{OK: true, Notes: []string{"no .gd files to check"}}, nil
 	}
-	// Private like the plugin keeps it: bridge.json, with the token, lives here.
-	if err := os.MkdirAll(p.MCPDir(), 0o700); err != nil {
-		return CheckResult{}, err
-	}
-	// Each run gets its own folder: several agent sessions may check
-	// scripts in the same project at once.
-	dir, err := os.MkdirTemp(p.MCPDir(), "check-")
+	dir, runnerRes, list, err := writeCheckInputs(p, scripts)
 	if err != nil {
 		return CheckResult{}, err
 	}
 	defer os.RemoveAll(dir)
-	runner := filepath.Join(dir, "check_scripts.gd")
-	if err := os.WriteFile(runner, checkScript, 0o644); err != nil {
-		return CheckResult{}, err
-	}
-	// The list goes in a file: Windows caps a command line at 32k characters.
-	list := filepath.Join(dir, "check_list.txt")
-	if err := os.WriteFile(list, []byte(strings.Join(scripts, "\n")+"\n"), 0o644); err != nil {
-		return CheckResult{}, err
-	}
-	runnerRes, err := p.ToRes(runner)
-	if err != nil {
-		return CheckResult{}, err
-	}
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -153,52 +134,89 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 	if ctx.Err() != nil {
 		return CheckResult{}, errors.New("the script check did not finish within 2 minutes; a script may run code at load time that never returns (static initialisers, @tool scripts)")
 	}
-
 	lines := strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
-	var loaded []struct {
-		Path   string `json:"path"`
-		Loaded bool   `json:"loaded"`
+	loaded, err := readLoaded(lines, scripts)
+	if err != nil && runErr != nil {
+		err = fmt.Errorf("%w (godot: %v)", err, runErr)
 	}
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("%w\nLast output:\n%s", err, tail(string(out), 20))
+	}
+	byFile, other := attributeIssues(ParseIssues(lines), scripts, strings.TrimSuffix(runnerRes, "check_scripts.gd"))
+	return buildResult(loaded, byFile, other), nil
+}
+
+// writeCheckInputs writes the checker and the list of scripts into a new
+// folder of their own, since several agent sessions may check scripts in the
+// same project at once. The caller removes dir.
+func writeCheckInputs(p *project.Project, scripts []string) (dir, runnerRes, list string, err error) {
+	// Private like the plugin keeps it: bridge.json, with the token, lives here.
+	if err = os.MkdirAll(p.MCPDir(), 0o700); err != nil {
+		return
+	}
+	if dir, err = os.MkdirTemp(p.MCPDir(), "check-"); err != nil {
+		return
+	}
+	runner := filepath.Join(dir, "check_scripts.gd")
+	// The list goes in a file: Windows caps a command line at 32k characters.
+	list = filepath.Join(dir, "check_list.txt")
+	if err = os.WriteFile(runner, checkScript, 0o644); err == nil {
+		err = os.WriteFile(list, []byte(strings.Join(scripts, "\n")+"\n"), 0o644)
+	}
+	if err == nil {
+		runnerRes, err = p.ToRes(runner)
+	}
+	if err != nil {
+		os.RemoveAll(dir)
+	}
+	return
+}
+
+type loadedScript struct {
+	Path   string `json:"path"`
+	Loaded bool   `json:"loaded"`
+}
+
+// readLoaded reads the checker's result line and makes sure it covers
+// exactly the requested scripts.
+func readLoaded(lines, scripts []string) ([]loadedScript, error) {
+	var loaded []loadedScript
 	found := false
 	for _, l := range lines {
-		l = CleanLine(l)
-		if strings.HasPrefix(l, resultMarker) {
-			found = json.Unmarshal([]byte(strings.TrimPrefix(l, resultMarker)), &loaded) == nil
+		if rest, ok := strings.CutPrefix(CleanLine(l), resultMarker); ok {
+			found = json.Unmarshal([]byte(rest), &loaded) == nil
 		}
 	}
 	if !found {
-		msg := "the script checker did not report a result"
-		if runErr != nil {
-			msg += ": " + runErr.Error()
-		}
-		return CheckResult{}, fmt.Errorf("%s\nLast output:\n%s", msg, tail(string(out), 20))
-	}
-
-	listed := map[string]bool{}
-	for _, s := range scripts {
-		listed[s] = true
+		return nil, errors.New("the script checker did not report a result")
 	}
 	reported := map[string]bool{}
 	for _, l := range loaded {
 		reported[l.Path] = true
 	}
-	if len(reported) != len(listed) || len(loaded) != len(listed) {
-		return CheckResult{}, fmt.Errorf("the checker reported %d files but %d were requested; run script_check again", len(loaded), len(listed))
+	if len(reported) != len(scripts) || len(loaded) != len(scripts) {
+		return nil, fmt.Errorf("the checker reported %d files but %d were requested; run script_check again", len(loaded), len(scripts))
 	}
-	for s := range listed {
+	for _, s := range scripts {
 		if !reported[s] {
-			return CheckResult{}, fmt.Errorf("the checker did not report %s; run script_check again", s)
+			return nil, fmt.Errorf("the checker did not report %s; run script_check again", s)
 		}
 	}
+	return loaded, nil
+}
 
-	// Godot returns a script object even when parsing failed, so "loaded"
-	// alone proves nothing: every error must be accounted for, and one that
-	// cannot be tied to a checked file fails the check instead of vanishing.
-	byFile := map[string][]Issue{}
+// attributeIssues ties each error to a checked script. Godot returns a
+// script object even when parsing failed, so "loaded" alone proves nothing:
+// an error that cannot be tied to a checked file goes to other, which fails
+// the check, instead of vanishing.
+func attributeIssues(issues []Issue, scripts []string, runnerDir string) (byFile map[string][]Issue, other []Issue) {
+	listed := map[string]bool{}
+	for _, s := range scripts {
+		listed[s] = true
+	}
+	byFile = map[string][]Issue{}
 	failedLoad := map[string]Issue{}
-	var other []Issue
-	runnerDir := strings.TrimSuffix(runnerRes, "check_scripts.gd")
-	for _, is := range ParseIssues(lines) {
+	for _, is := range issues {
 		switch {
 		case is.Severity != "error" || strings.HasPrefix(is.File, runnerDir):
 		case strings.HasPrefix(is.Message, "Failed to load script") && listed[is.File]:
@@ -216,8 +234,11 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 			byFile[file] = []Issue{is}
 		}
 	}
+	return byFile, other
+}
 
-	res := CheckResult{OK: true, Checked: len(loaded), Other: other}
+func buildResult(loaded []loadedScript, byFile map[string][]Issue, other []Issue) CheckResult {
+	res := CheckResult{OK: len(other) == 0, Checked: len(loaded), Other: other}
 	for _, l := range loaded {
 		sr := ScriptResult{Path: l.Path, OK: l.Loaded && len(byFile[l.Path]) == 0, Errors: byFile[l.Path]}
 		if !l.Loaded && len(sr.Errors) == 0 {
@@ -229,10 +250,7 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 		}
 		res.Scripts = append(res.Scripts, sr)
 	}
-	if len(other) > 0 {
-		res.OK = false
-	}
-	return res, nil
+	return res
 }
 
 func tail(s string, n int) string {

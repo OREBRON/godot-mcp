@@ -56,36 +56,40 @@ func CleanLine(s string) string {
 func ParseIssues(lines []string) []Issue {
 	var out []Issue
 	for i := 0; i < len(lines); i++ {
-		line := CleanLine(lines[i])
-		var is *Issue
-		for _, p := range issuePrefixes {
-			if strings.HasPrefix(line, p.prefix) {
-				is = &Issue{
-					Severity: p.severity,
-					Kind:     strings.TrimSuffix(p.prefix, ": "),
-					Message:  strings.TrimSpace(line[len(p.prefix):]),
-				}
-				break
-			}
-		}
-		if is == nil {
+		is, ok := issueStart(CleanLine(lines[i]))
+		if !ok {
 			continue
 		}
 		// The location is on the next "at:" line; backtrace lines follow it.
 		if i+1 < len(lines) {
-			next := strings.TrimSpace(CleanLine(lines[i+1]))
-			if strings.HasPrefix(next, "at:") {
-				is.Where = strings.TrimSpace(strings.TrimPrefix(next, "at:"))
+			if where, ok := strings.CutPrefix(strings.TrimSpace(CleanLine(lines[i+1])), "at:"); ok {
+				is.Where = strings.TrimSpace(where)
 				i++
 			}
 		}
-		if m := resLoc.FindStringSubmatch(is.Where); m != nil {
-			is.File = m[1]
-			is.Line, _ = strconv.Atoi(m[2])
-		} else if m := resPath.FindString(is.Message); m != "" {
-			is.File = trimPath(m)
-		}
-		out = append(out, *is)
+		is.findFile()
+		out = append(out, is)
 	}
 	return out
+}
+
+// issueStart recognises the first line of an error or warning block.
+func issueStart(line string) (Issue, bool) {
+	for _, p := range issuePrefixes {
+		if msg, ok := strings.CutPrefix(line, p.prefix); ok {
+			return Issue{Severity: p.severity, Kind: strings.TrimSuffix(p.prefix, ": "), Message: strings.TrimSpace(msg)}, true
+		}
+	}
+	return Issue{}, false
+}
+
+// findFile takes the res:// file and line from the location, or failing
+// that a res:// path named in the message.
+func (is *Issue) findFile() {
+	if m := resLoc.FindStringSubmatch(is.Where); m != nil {
+		is.File = m[1]
+		is.Line, _ = strconv.Atoi(m[2])
+	} else if m := resPath.FindString(is.Message); m != "" {
+		is.File = trimPath(m)
+	}
 }

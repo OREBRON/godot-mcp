@@ -45,26 +45,44 @@ func Locate(override string) (Exec, error) {
 	if env := os.Getenv("GODOT_PATH"); env != "" {
 		return fromUser(env, "GODOT_PATH")
 	}
-	for _, name := range pathNames() {
-		if p, err := exec.LookPath(name); err == nil {
-			return Exec{Path: p, Source: "PATH (" + name + ")"}, nil
-		}
-	}
-	for _, c := range defaultLocations() {
-		if isFile(c) {
-			return Exec{Path: c, Source: "default location"}, nil
-		}
-	}
-	if runtime.GOOS == "linux" {
-		if fp, err := exec.LookPath("flatpak"); err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if exec.CommandContext(ctx, fp, "info", "org.godotengine.Godot").Run() == nil {
-				return Exec{Path: fp, Args: []string{"run", "org.godotengine.Godot"}, Source: "Flatpak"}, nil
-			}
+	for _, find := range []func() (Exec, bool){onPath, atDefaultLocation, flatpak} {
+		if e, ok := find(); ok {
+			return e, nil
 		}
 	}
 	return Exec{}, errors.New(notFoundHelp())
+}
+
+func onPath() (Exec, bool) {
+	for _, name := range pathNames() {
+		if p, err := exec.LookPath(name); err == nil {
+			return Exec{Path: p, Source: "PATH (" + name + ")"}, true
+		}
+	}
+	return Exec{}, false
+}
+
+func atDefaultLocation() (Exec, bool) {
+	for _, c := range defaultLocations() {
+		if isFile(c) {
+			return Exec{Path: c, Source: "default location"}, true
+		}
+	}
+	return Exec{}, false
+}
+
+// flatpak finds the Godot Flatpak, which runs as "flatpak run <app id>".
+func flatpak() (Exec, bool) {
+	fp, err := exec.LookPath("flatpak")
+	if runtime.GOOS != "linux" || err != nil {
+		return Exec{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if exec.CommandContext(ctx, fp, "info", "org.godotengine.Godot").Run() != nil {
+		return Exec{}, false
+	}
+	return Exec{Path: fp, Args: []string{"run", "org.godotengine.Godot"}, Source: "Flatpak"}, true
 }
 
 func fromUser(p, source string) (Exec, error) {
