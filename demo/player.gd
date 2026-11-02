@@ -4,6 +4,7 @@ extends CharacterBody2D
 signal died
 
 @export var speed := 200.0
+@export var weapon: ItemData
 var health := 3
 
 

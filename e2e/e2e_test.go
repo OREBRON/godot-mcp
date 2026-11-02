@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 28 {
-		t.Errorf("got %d tools, want 28", len(tools.Tools))
+	if len(tools.Tools) != 29 {
+		t.Errorf("got %d tools, want 29", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -279,6 +279,25 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_add", map[string]any{"type": "Node2D", "name": "Temp", "parent_path": "Hero"})
 	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
 	fails("node_get", map[string]any{"node_path": "Hero/Temp"}, "NODE_NOT_FOUND")
+
+	// Resource files, built-in and class_name, and class_name resources inline.
+	ok("resource_save", map[string]any{"path": "res://items/box.tres", "type": "RectangleShape2D", "properties": map[string]any{"size": []any{4, 4}}})
+	ok("resource_save", map[string]any{"path": "res://items/sword.tres", "type": "ItemData", "properties": map[string]any{"title": "Sword", "damage": 5}})
+	fails("resource_save", map[string]any{"path": "res://items/sword.tres", "type": "ItemData"}, "FILE_EXISTS")
+	ok("resource_save", map[string]any{"path": "res://items/sword.tres", "type": "ItemData", "properties": map[string]any{"title": "Sword", "damage": 6}, "overwrite": true})
+	fails("resource_save", map[string]any{"path": "res://items/x.tres", "type": "Sprite2D"}, "not a resource class")
+	fails("resource_save", map[string]any{"path": "res://items/x.tres", "type": "ItemData", "properties": map[string]any{"damage": "lots"}}, "ItemData.damage")
+	for file, want := range map[string]string{"box.tres": "size = Vector2(4, 4)", "sword.tres": "damage = 6"} {
+		if b, _ := os.ReadFile(filepath.Join(proj, "items", file)); !strings.Contains(string(b), want) {
+			t.Errorf("%s lacks %q:\n%s", file, want, b)
+		}
+	}
+	ok("node_set_properties", map[string]any{"node_path": "Player", "properties": map[string]any{"weapon": map[string]any{"type": "ItemData", "damage": 7}}})
+	if w, _ := ok("node_get", map[string]any{"node_path": "Player", "properties": []any{"weapon"}})["properties"].(map[string]any)["weapon"].(map[string]any); w["type"] != "ItemData" || w["damage"] != 7.0 {
+		t.Errorf("inline ItemData reads back as %v", w)
+	}
+	ok("node_set_properties", map[string]any{"node_path": "Player", "properties": map[string]any{"weapon": "res://items/sword.tres"}})
+	fails("node_set_properties", map[string]any{"node_path": "Player", "properties": map[string]any{"weapon": "res://items/box.tres"}}, "needs ItemData")
 
 	// Copy, rename, reparent and reorder, and Editable Children.
 	if r := ok("node_duplicate", map[string]any{"node_path": "Hero"}); r["path"] != "Hero2" {

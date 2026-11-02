@@ -89,6 +89,13 @@ type nodeDuplicateIn struct {
 	Name     string `json:"name,omitempty" jsonschema:"name of the copy (default: Godot numbers it, e.g. Enemy2)"`
 }
 
+type resourceSaveIn struct {
+	Path       string         `json:"path" jsonschema:"res:// path of the .tres file to write"`
+	Type       string         `json:"type" jsonschema:"resource class: built-in such as StandardMaterial3D or RectangleShape2D, or a class_name from your scripts"`
+	Properties map[string]any `json:"properties,omitempty" jsonschema:"properties to set, in node_set_properties' value format; nested resources inline"`
+	Overwrite  bool           `json:"overwrite,omitempty" jsonschema:"replace an existing file"`
+}
+
 type screenshotIn struct {
 	Viewport string `json:"viewport,omitempty" jsonschema:"\"2d\", \"3d\" or \"auto\" (default: 3d when the scene root is a Node3D, else 2d)"`
 	MaxWidth int    `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
@@ -116,6 +123,12 @@ func (s *Server) addSceneTools() {
 		Description: "Save the edited scene to disk. Node edits change nothing on disk until this is called.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(true), IdempotentHint: true, OpenWorldHint: ptr(false)},
 	}, "scene_save", time.Minute, "path")
+	addEditorTool[resourceSaveIn](s, &mcp.Tool{
+		Name: "resource_save",
+		Description: "Create a resource file (.tres) of a built-in class or a class_name class with its properties: a material, a shape, an item's data. " +
+			"Use it from a node property by its res:// path. Writing a file is not undoable; an existing file needs overwrite.",
+		Annotations: editorEdit,
+	}, "resource_save", 30*time.Second, "path")
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "editor_screenshot",
 		Description: "Capture the editor's 2D or 3D viewport as an image, to check layout and visuals of the edited scene. Not available when the editor runs headless.",

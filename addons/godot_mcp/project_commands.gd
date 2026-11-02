@@ -28,6 +28,7 @@ func handlers() -> Dictionary:
 		"project_settings_get": _settings_get,
 		"project_settings_set": _settings_set,
 		"input_action_set": _input_action_set,
+		"resource_save": _resource_save,
 	}
 
 
@@ -191,3 +192,27 @@ func _key_event(spec: String) -> InputEventKey:
 			_:
 				return null
 	return ev
+
+
+# ---- resource files ----
+
+## Writes a new .tres of a built-in class or a class_name class. Writing a
+## file is not undoable.
+func _resource_save(p: Dictionary) -> Dictionary:
+	var path := str(p.get("path", ""))
+	if not (path.ends_with(".tres") or path.ends_with(".res")):
+		return _fail("INVALID_PARAMS", "path must end with .tres or .res, got \"%s\"" % path)
+	if FileAccess.file_exists(path) and not bool(p.get("overwrite", false)):
+		return _fail("FILE_EXISTS", "%s already exists" % path, "pass overwrite: true to replace it")
+	var spec: Dictionary = p.get("properties", {}).duplicate() if p.get("properties") is Dictionary else {}
+	spec["type"] = str(p.get("type", ""))
+	var made := Codec.new_resource(spec)
+	if made.has("error"):
+		return _fail("INVALID_VALUE", made.error)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(path.get_base_dir()))
+	made.value.take_over_path(path) # later loads of path get the new resource
+	var err := ResourceSaver.save(made.value, path)
+	if err != OK:
+		return _fail("SAVE_FAILED", "saving %s failed: %s" % [path, error_string(err)])
+	EditorInterface.get_resource_filesystem().update_file(path)
+	return {"saved": path, "type": spec.type}

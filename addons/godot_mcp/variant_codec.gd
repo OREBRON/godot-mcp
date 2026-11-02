@@ -50,9 +50,9 @@ static func _encode_object(v: Variant, depth: int) -> Variant:
 static func _encode_embedded(res: Resource, depth: int) -> Variant:
 	if depth >= 3:
 		return "<%s>" % res.get_class() # deeper nesting: read it with "a:b:c"
-	var out := {"type": res.get_class()}
+	var out := {"type": _type_name(res)}
 	for prop in res.get_property_list():
-		if not (prop.usage & PROPERTY_USAGE_STORAGE) or prop.name.begins_with("resource_"):
+		if not (prop.usage & PROPERTY_USAGE_STORAGE) or prop.name.begins_with("resource_") or prop.name == "script":
 			continue
 		var value = res.get(prop.name)
 		var default = ClassDB.class_get_property_default_value(res.get_class(), prop.name)
@@ -79,6 +79,13 @@ static func property_info(obj: Object, path: String) -> Dictionary:
 			return {}
 		obj = next
 	return {}
+
+
+## The class_name of a resource's script, or its built-in class.
+static func _type_name(res: Resource) -> String:
+	var script: Script = res.get_script()
+	var global := script.get_global_name() if script != null else &""
+	return str(global) if not str(global).is_empty() else res.get_class()
 
 
 ## Converts a JSON value for a property. info is the property's entry from
@@ -184,20 +191,38 @@ static func _decode_object(value: Variant, info: Dictionary) -> Dictionary:
 ## Builds a resource from {"type": class, property: value, ...}, decoding
 ## each property like any other value; nested resources work the same way.
 static func _new_resource(spec: Dictionary, info: Dictionary) -> Dictionary:
-	var type := str(spec.type)
-	if not ClassDB.class_exists(type) or not ClassDB.is_parent_class(type, "Resource"):
-		return {"error": "\"%s\" is not a resource class" % type}
-	if not ClassDB.can_instantiate(type):
-		return {"error": "%s is abstract; use one of: %s" % [type, ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 8))]}
-	var res: Resource = ClassDB.instantiate(type)
-	var mismatch := _class_mismatch(res, info)
+	var made := _instantiate_resource(str(spec.type))
+	if made.has("error"):
+		return made
+	var mismatch := _class_mismatch(made.value, info)
 	if not mismatch.is_empty():
 		return {"error": mismatch}
 	for key in spec:
-		var problem := "" if key == "type" else _set_field(res, str(key), spec[key])
+		var problem := "" if key == "type" else _set_field(made.value, str(key), spec[key])
 		if not problem.is_empty():
-			return {"error": "%s.%s: %s" % [type, key, problem]}
-	return {"value": res}
+			return {"error": "%s.%s: %s" % [spec.type, key, problem]}
+	return made
+
+
+## Builds a resource from {"type": class, property: value, ...} for a
+## resource file of its own.
+static func new_resource(spec: Dictionary) -> Dictionary:
+	return _new_resource(spec, {})
+
+
+## A new instance of a built-in resource class or of a class_name script
+## that extends Resource.
+static func _instantiate_resource(type: String) -> Dictionary:
+	if ClassDB.class_exists(type):
+		if not ClassDB.is_parent_class(type, "Resource"):
+			return {"error": "\"%s\" is not a resource class" % type}
+		if not ClassDB.can_instantiate(type):
+			return {"error": "%s is abstract; use one of: %s" % [type, ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 8))]}
+		return {"value": ClassDB.instantiate(type)}
+	var obj = instantiate_script_class(type)
+	if obj == null:
+		return {"error": "\"%s\" is not a resource class" % type}
+	return {"value": obj} if obj is Resource else {"error": "%s does not extend Resource" % type}
 
 
 ## A new object of a class_name class, or null. Like the editor's own dialogs
