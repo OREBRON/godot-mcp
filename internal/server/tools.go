@@ -288,6 +288,13 @@ func (s *Server) addGameTools() {
 		Annotations: readOnly,
 	}, "node_get", 15*time.Second)
 
+	addGameTool[gameNodeSetIn](s, &mcp.Tool{
+		Name: "game_node_set",
+		Description: "Set properties of a node in the running game to set up a situation to test, such as moving the player next to a door or lowering its health. " +
+			"All values are checked first, so a bad one changes nothing. The change lives only in the running game; nothing is saved.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(false)},
+	}, "node_set", 15*time.Second)
+
 	addGameTool[gameTimeIn](s, &mcp.Tool{
 		Name: "game_time",
 		Description: "Pause, resume or step the game started by game_run. step runs exactly the given number of physics frames and pauses again, " +
@@ -327,6 +334,11 @@ type gameInputIn struct {
 	Position    []float64 `json:"position,omitempty" jsonschema:"[x, y] in the game's viewport coordinates; on its own it moves the mouse there"`
 	Duration    *float64  `json:"duration,omitempty" jsonschema:"seconds to hold before releasing (default 0.1)"`
 	Pressed     *bool     `json:"pressed,omitempty" jsonschema:"send only the press (true) or only the release (false), to hold an input across calls such as game_time steps"`
+}
+
+type gameNodeSetIn struct {
+	NodePath   string         `json:"node_path" jsonschema:"node relative to the current scene, e.g. \"Player\", or absolute such as \"/root/Game\""`
+	Properties map[string]any `json:"properties" jsonschema:"property to value: numbers, strings and booleans as JSON, [x, y] or [x, y, z] for vectors, anything else in Godot's text form such as \"Color(1, 0, 0, 1)\"; a colon reaches into a resource, e.g. \"shape:size\""`
 }
 
 type gameScreenshotIn struct {

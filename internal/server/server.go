@@ -27,7 +27,7 @@ const instructions = `Godot MCP drives a Godot 4 project.
 - Scenes: edit through scene_* and node_* tools while the editor is open. They go through the editor's undo history, so the user can revert them with Ctrl+Z, and change nothing on disk until scene_save. To revert your own change, make the opposite change (node_delete what you added, set properties back).
 - Do not edit a .tscn file by hand while the editor has it open; the editor's next save overwrites it.
 - Verify: game_run starts the game and returns its first output and errors; game_output reads more; editor_screenshot shows the editor viewport.
-- While a game started by game_run runs, game_scene_tree and game_node_get show its live state, game_input sends it actions, keys and clicks, game_screenshot shows its frame (not when headless), and game_time pauses it or steps it frame by frame for checks that come out the same every time.
+- While a game started by game_run runs, game_scene_tree and game_node_get show its live state, game_node_set changes it, game_input sends it actions, keys and clicks, game_screenshot shows its frame (not when headless), and game_time pauses it or steps it frame by frame for checks that come out the same every time.
 - Paths are res:// paths. Node paths are relative to the edited scene's root ("." is the root, "Player/Sprite2D" a child).`
 
 // Options configure a server.

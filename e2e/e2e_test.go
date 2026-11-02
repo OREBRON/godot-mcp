@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 23 {
-		t.Errorf("got %d tools, want 23", len(tools.Tools))
+	if len(tools.Tools) != 24 {
+		t.Errorf("got %d tools, want 24", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -463,6 +463,18 @@ func TestEndToEnd(t *testing.T) {
 	fails("game_input", map[string]any{}, "INVALID_PARAMS")
 	fails("game_input", map[string]any{"action": "teleport"}, "no input action")
 	ok("game_input", map[string]any{"action": "jump"}) // added with input_action_set before the run
+
+	// Setting up a situation in the live game: all values or none.
+	set := ok("game_node_set", map[string]any{"node_path": "Player", "properties": map[string]any{"position": []any{100, 200}, "health": 1}})["properties"].(map[string]any)
+	if set["position"] != "Vector2(100, 200)" || set["health"] != 1.0 {
+		t.Errorf("game_node_set Player = %v", set)
+	}
+	ok("game_node_set", map[string]any{"node_path": "Player", "properties": map[string]any{"position": "Vector2(5, 6)"}})
+	fails("game_node_set", map[string]any{"node_path": "Player", "properties": map[string]any{"positon": []any{1, 2}}}, "PROPERTY_NOT_FOUND")
+	fails("game_node_set", map[string]any{"node_path": "Player", "properties": map[string]any{"position": []any{9, 9}, "health": "lots"}}, "INVALID_VALUE")
+	if p := ok("game_node_get", map[string]any{"node_path": "Player", "properties": []any{"position"}})["properties"].(map[string]any); p["position"] != "Vector2(5, 6)" {
+		t.Errorf("a failed game_node_set still moved the player: %v", p)
+	}
 	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
 	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
 	fails("game_screenshot", nil, "NOT_AVAILABLE_HEADLESS")

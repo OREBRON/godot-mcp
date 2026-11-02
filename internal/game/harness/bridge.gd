@@ -27,6 +27,7 @@ func _ready() -> void:
 		"ping": _ping,
 		"scene_tree": _scene_tree,
 		"node_get": _node_get,
+		"node_set": _node_set,
 		"time": _time,
 		"input": _input_cmd,
 		"screenshot": _screenshot,
@@ -270,6 +271,78 @@ func _listed_properties(node: Node, wanted: Array) -> Dictionary:
 
 func _has_property(node: Node, prop: String) -> bool:
 	return StringName(prop.get_slice(":", 0)) in node
+
+
+## Sets properties of a live node, all or none: every value is converted
+## first, so a bad one changes nothing. Nothing is saved.
+func _node_set(params: Dictionary) -> Dictionary:
+	var found: Variant = _resolve(str(params.get("node_path", "")))
+	if found is Dictionary:
+		return found
+	var node: Node = found
+	var props: Dictionary = {}
+	var raw: Variant = params.get("properties", {})
+	if raw is Dictionary:
+		props = raw
+	if props.is_empty():
+		return _fail("INVALID_PARAMS", "properties must be a non-empty object")
+	var changes: Array[Array] = []
+	for key: Variant in props:
+		var change: Variant = _live_change(node, str(key), props[key])
+		if change is Dictionary:
+			return change
+		changes.append(change)
+	for change: Array in changes:
+		var path: NodePath = change[0]
+		node.set_indexed(path, change[1])
+	return {"path": _rel(node), "properties": _listed_properties(node, props.keys())}
+
+
+## [NodePath, value] for one property, or an error.
+func _live_change(node: Node, prop: String, value: Variant) -> Variant:
+	if not _has_property(node, prop):
+		return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), prop], "call game_node_get without properties to see what it has")
+	var path: NodePath = NodePath(prop)
+	var current: Variant = node.get_indexed(path)
+	var converted: Variant = _convert(value, current)
+	if converted == null and value != null:
+		return _fail("INVALID_VALUE", "%s: expected %s, e.g. %s" % [prop, type_string(typeof(current)), var_to_str(current)])
+	return [path, converted]
+
+
+## value in the type of current, or null if it does not fit: JSON numbers,
+## strings and booleans, [x, y] or [x, y, z] for vectors, anything else in
+## Godot's text form such as "Color(1, 0, 0, 1)".
+func _convert(value: Variant, current: Variant) -> Variant:
+	var want: int = typeof(current)
+	if want == TYPE_NIL or typeof(value) == want:
+		return value
+	if (want == TYPE_INT or want == TYPE_FLOAT) and (value is int or value is float):
+		return type_convert(value, want)
+	if value is String and (want == TYPE_STRING_NAME or want == TYPE_NODE_PATH):
+		return type_convert(value, want)
+	if value is String:
+		var text: String = value
+		var parsed: Variant = str_to_var(text)
+		return parsed if typeof(parsed) == want else null
+	if value is Array:
+		var items: Array = value
+		return _vector_from(items, want)
+	return null
+
+
+func _vector_from(items: Array, want: int) -> Variant:
+	var nums: Array[float] = []
+	for item: Variant in items:
+		if not (item is int or item is float):
+			return null
+		var f: float = item
+		nums.append(f)
+	if want == TYPE_VECTOR2 and nums.size() == 2:
+		return Vector2(nums[0], nums[1])
+	if want == TYPE_VECTOR3 and nums.size() == 3:
+		return Vector3(nums[0], nums[1], nums[2])
+	return null
 
 
 ## Turns a value into JSON: plain values as they are, saved resources as
