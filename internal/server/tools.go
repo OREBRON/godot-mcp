@@ -406,7 +406,7 @@ type nodeAddIn struct {
 
 type nodeSetPropertiesIn struct {
 	NodePath   string         `json:"node_path" jsonschema:"node relative to the scene root, e.g. \".\" or \"Player/Sprite2D\""`
-	Properties map[string]any `json:"properties" jsonschema:"property name to value. Numbers, strings and booleans as JSON; vectors as [x, y] or {\"x\":..,\"y\":..}; colours as \"#ff8800\" or [r, g, b, a]; resources and scripts as res:// paths; anything else in Godot's text form, e.g. \"Rect2(0, 0, 16, 16)\". Nested values use a colon path, e.g. \"shape:size\"."`
+	Properties map[string]any `json:"properties" jsonschema:"property name to value. Numbers, strings and booleans as JSON; vectors as [x, y] or {\"x\":..,\"y\":..}; colours as \"#ff8800\" or [r, g, b, a]; resources and scripts as res:// paths; a new resource as {\"type\": \"RectangleShape2D\", \"size\": [16, 16]}; anything else in Godot's text form, e.g. \"Rect2(0, 0, 16, 16)\". Nested values use a colon path, e.g. \"shape:size\"."`
 }
 
 type nodeDeleteIn struct {

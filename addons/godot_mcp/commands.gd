@@ -129,26 +129,6 @@ func _resolve(path: String) -> Variant:
 	return _fail("NODE_NOT_FOUND", "no node at \"%s\"" % p, "children of \"%s\": %s" % [_rel(cur), ", ".join(kids) if not kids.is_empty() else "(none)"])
 
 
-## The property-list entry of a property (type, hint, hint_string,
-## class_name), following "a:b" sub-paths into resources; {} if the
-## property does not exist.
-func _property_info(obj: Object, path: String) -> Dictionary:
-	var parts := path.split(":")
-	for i in parts.size():
-		var found := {}
-		for info in obj.get_property_list():
-			if info.name == parts[i]:
-				found = info
-				break
-		if found.is_empty() or i == parts.size() - 1:
-			return found
-		var next = obj.get(parts[i])
-		if not (next is Object):
-			return {}
-		obj = next
-	return {}
-
-
 func _similar_properties(obj: Object, name: String) -> String:
 	var hits := []
 	for info in obj.get_property_list():
@@ -187,7 +167,7 @@ func _prepare_changes(node: Node, props: Dictionary) -> Variant:
 	var changes := []
 	for key in props:
 		var name := str(key)
-		var info := _property_info(node, name)
+		var info := Codec.property_info(node, name)
 		if info.is_empty():
 			var similar := _similar_properties(node, name.get_slice(":", 0))
 			return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "read the node's properties with node_get")
@@ -293,7 +273,7 @@ func _node_get(p: Dictionary) -> Dictionary:
 	else:
 		for key in wanted:
 			var name := str(key)
-			if _property_info(node, name).is_empty():
+			if Codec.property_info(node, name).is_empty():
 				var similar := _similar_properties(node, name.get_slice(":", 0))
 				return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), name], ("similar: " + similar) if not similar.is_empty() else "")
 			out[name] = Codec.encode(node.get_indexed(NodePath(name)))

@@ -8,7 +8,7 @@ extends RefCounted
 const MAX_TEXT := 4000
 
 
-static func encode(v: Variant) -> Variant:
+static func encode(v: Variant, depth := 0) -> Variant:
 	match typeof(v):
 		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:
 			return v
@@ -21,25 +21,61 @@ static func encode(v: Variant) -> Variant:
 				var path: String = v.resource_path
 				if not path.is_empty() and not path.contains("::"):
 					return path
-				# Embedded sub-resource: read its fields with "property:field".
-				return "<%s (embedded)>" % v.get_class()
+				return _encode_embedded(v, depth)
 			if v is Node:
 				return "<Node %s>" % v.name
 			return "<%s>" % v.get_class()
 		TYPE_ARRAY:
 			var out := []
 			for e in v:
-				out.append(encode(e))
+				out.append(encode(e, depth))
 			return out
 		TYPE_DICTIONARY:
 			var out := {}
 			for k in v:
-				out[str(k)] = encode(v[k])
+				out[str(k)] = encode(v[k], depth)
 			return out
 	var text := var_to_str(v)
 	if text.length() > MAX_TEXT:
 		return text.substr(0, MAX_TEXT) + "... (%d characters, truncated)" % text.length()
 	return text
+
+
+## A resource stored inside the scene, in the form decode() accepts back:
+## {"type": class, property: value, ...} with the properties that differ
+## from the class defaults.
+static func _encode_embedded(res: Resource, depth: int) -> Variant:
+	if depth >= 3:
+		return "<%s>" % res.get_class() # deeper nesting: read it with "a:b:c"
+	var out := {"type": res.get_class()}
+	for prop in res.get_property_list():
+		if not (prop.usage & PROPERTY_USAGE_STORAGE) or prop.name.begins_with("resource_"):
+			continue
+		var value = res.get(prop.name)
+		var default = ClassDB.class_get_property_default_value(res.get_class(), prop.name)
+		if typeof(value) != typeof(default) or value != default:
+			out[prop.name] = encode(value, depth + 1)
+	return out
+
+
+## The property-list entry of a property (type, hint, hint_string,
+## class_name), following "a:b" sub-paths into resources; {} if the
+## property does not exist.
+static func property_info(obj: Object, path: String) -> Dictionary:
+	var parts := path.split(":")
+	for i in parts.size():
+		var found := {}
+		for info in obj.get_property_list():
+			if info.name == parts[i]:
+				found = info
+				break
+		if found.is_empty() or i == parts.size() - 1:
+			return found
+		var next = obj.get(parts[i])
+		if not (next is Object):
+			return {}
+		obj = next
+	return {}
 
 
 ## Converts a JSON value for a property. info is the property's entry from
@@ -137,7 +173,39 @@ static func _decode_object(value: Variant, info: Dictionary) -> Dictionary:
 		return {"value": null}
 	if value is String and (value.begins_with("res://") or value.begins_with("uid://")):
 		return _load_resource(value, info)
-	return {"error": "expected a res:// path to a resource or script, or null"}
+	if value is Dictionary and value.has("type"):
+		return _new_resource(value, info)
+	return {"error": "expected a res:// path, a new resource such as {\"type\": \"RectangleShape2D\", \"size\": [16, 16]}, or null"}
+
+
+## Builds a resource from {"type": class, property: value, ...}, decoding
+## each property like any other value; nested resources work the same way.
+static func _new_resource(spec: Dictionary, info: Dictionary) -> Dictionary:
+	var type := str(spec.type)
+	if not ClassDB.class_exists(type) or not ClassDB.is_parent_class(type, "Resource"):
+		return {"error": "\"%s\" is not a resource class" % type}
+	if not ClassDB.can_instantiate(type):
+		return {"error": "%s is abstract; use one of: %s" % [type, ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 8))]}
+	var res: Resource = ClassDB.instantiate(type)
+	var mismatch := _class_mismatch(res, info)
+	if not mismatch.is_empty():
+		return {"error": mismatch}
+	for key in spec:
+		var problem := "" if key == "type" else _set_field(res, str(key), spec[key])
+		if not problem.is_empty():
+			return {"error": "%s.%s: %s" % [type, key, problem]}
+	return {"value": res}
+
+
+static func _set_field(obj: Object, name: String, value: Variant) -> String:
+	var field := property_info(obj, name)
+	if field.is_empty():
+		return "no such property"
+	var conv := decode(value, field, obj.get(name))
+	if conv.has("error"):
+		return conv.error
+	obj.set(name, conv.value)
+	return ""
 
 
 static func _load_resource(value: String, info: Dictionary) -> Dictionary:
@@ -177,7 +245,8 @@ static func _class_mismatch(res: Resource, info: Dictionary) -> String:
 	for name in allowed:
 		if _is_a(res, name):
 			return ""
-	return "needs %s, but %s is a %s" % [" or ".join(allowed), res.resource_path, res.get_class()]
+	var what := res.resource_path if not res.resource_path.is_empty() else "the new resource"
+	return "needs %s, but %s is a %s" % [" or ".join(allowed), what, res.get_class()]
 
 
 ## Whether res is of the built-in class or class_name name.

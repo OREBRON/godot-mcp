@@ -216,6 +216,24 @@ func TestEndToEnd(t *testing.T) {
 	}
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"script": "res://demo/player.gd"}}, "extends CharacterBody2D")
 
+	// A new resource inline, read back in the same form.
+	ok("node_set_properties", map[string]any{"node_path": "Hit", "properties": map[string]any{"shape": map[string]any{"type": "RectangleShape2D", "size": []any{8, 12}}}})
+	shape := ok("node_get", map[string]any{"node_path": "Hit", "properties": []any{"shape", "shape:size"}})["properties"].(map[string]any)
+	if inline, _ := shape["shape"].(map[string]any); inline["type"] != "RectangleShape2D" || inline["size"] != "Vector2(8, 12)" || shape["shape:size"] != "Vector2(8, 12)" {
+		t.Errorf("inline shape reads back as %v", shape)
+	}
+	for spec, want := range map[string]string{
+		`{"type": "Sprite2D"}`:                       "not a resource class",
+		`{"type": "PackedScene"}`:                    "needs Shape2D",
+		`{"type": "Shape2D"}`:                        "abstract",
+		`{"type": "CircleShape2D", "radius": "big"}`: "CircleShape2D.radius",
+		`{"type": "CircleShape2D", "radus": 3}`:      "no such property",
+	} {
+		var v map[string]any
+		json.Unmarshal([]byte(spec), &v)
+		fails("node_set_properties", map[string]any{"node_path": "Hit", "properties": map[string]any{"shape": v}}, want)
+	}
+
 	// Paths inside property values get the same checks as tool paths.
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": "res://../outside.png"}}, "leaves the project")
 	fails("node_set_properties", map[string]any{"node_path": "Hero", "properties": map[string]any{"texture": `res://demo\..\..\outside.png`}}, "leaves the project")
