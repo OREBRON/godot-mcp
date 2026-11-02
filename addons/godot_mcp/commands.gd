@@ -25,6 +25,7 @@ func _init(plugin: EditorPlugin) -> void:
 		"node_add": _node_add,
 		"node_set_properties": _node_set_properties,
 		"node_delete": _node_delete,
+		"node_signal_connect": _node_signal_connect,
 		"editor_screenshot": _editor_screenshot,
 	}
 
@@ -501,6 +502,74 @@ func _node_delete(p: Dictionary) -> Dictionary:
 	ur.commit_action()
 	var removed := owners.filter(func(pair: Array) -> bool: return pair[1] == root).size()
 	return {"scene": root.scene_file_path, "deleted": path, "nodes_removed": removed}
+
+
+func _node_signal_connect(p: Dictionary) -> Dictionary:
+	var from = _resolve(str(p.get("from", "")))
+	if _is_error(from):
+		return from
+	var to = _resolve(str(p.get("to", "")))
+	if _is_error(to):
+		return to
+	var sig := str(p.get("signal", ""))
+	var method := str(p.get("method", ""))
+	var problem = _check_connection(from, sig, to, method)
+	if problem != null:
+		return problem
+	var callable := Callable(to, method)
+	var remove := bool(p.get("disconnect", false))
+	if from.is_connected(sig, callable) == remove:
+		_record_connection(from, sig, callable, remove)
+	return {"scene": _root().scene_file_path, "connected": not remove, "connections": _connections(from, sig)}
+
+
+func _check_connection(from: Node, sig: String, to: Node, method: String) -> Variant:
+	var foreign = _check_editable(from, false)
+	if foreign != null:
+		return foreign
+	if not from.has_signal(sig):
+		var names := from.get_signal_list().map(func(s: Dictionary) -> String: return str(s.name))
+		return _fail("SIGNAL_NOT_FOUND", "%s has no signal \"%s\"" % [from.get_class(), sig], "its signals: " + ", ".join(names.slice(0, 25)))
+	if not _has_method(to, method):
+		var script: Script = to.get_script()
+		var where := script.resource_path if script != null else "a script attached to it"
+		return _fail("METHOD_NOT_FOUND", "\"%s\" has no method %s" % [_rel(to), method], "add func %s() to %s first, then run script_check" % [method, where])
+	return null
+
+
+## Whether node's class or script (or a script it extends) has method.
+func _has_method(node: Node, method: String) -> bool:
+	if ClassDB.class_has_method(node.get_class(), method):
+		return true
+	var script: Script = node.get_script()
+	while script != null:
+		if script.get_script_method_list().any(func(m: Dictionary) -> bool: return m.name == method):
+			return true
+		script = script.get_base_script()
+	return false
+
+
+## Connects or disconnects as one undoable action. CONNECT_PERSIST makes the
+## editor save the connection with the scene, as its Node dock does.
+func _record_connection(from: Node, sig: String, callable: Callable, remove: bool) -> void:
+	var ur := _plugin.get_undo_redo()
+	ur.create_action("MCP: %s %s" % ["disconnect" if remove else "connect", sig])
+	if remove:
+		ur.add_do_method(from, "disconnect", sig, callable)
+		ur.add_undo_method(from, "connect", sig, callable, CONNECT_PERSIST)
+	else:
+		ur.add_do_method(from, "connect", sig, callable, CONNECT_PERSIST)
+		ur.add_undo_method(from, "disconnect", sig, callable)
+	ur.commit_action()
+
+
+func _connections(from: Node, sig: String) -> Array:
+	var out := []
+	for c in from.get_signal_connection_list(sig):
+		var target = c.callable.get_object()
+		if target is Node and _inside(target):
+			out.append({"to": _rel(target), "method": str(c.callable.get_method())})
+	return out
 
 
 func _editor_screenshot(p: Dictionary) -> Dictionary:

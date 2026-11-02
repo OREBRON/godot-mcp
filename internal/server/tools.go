@@ -413,6 +413,14 @@ type nodeDeleteIn struct {
 	NodePath string `json:"node_path" jsonschema:"node to delete with all of its children, relative to the scene root; the root itself cannot be deleted"`
 }
 
+type nodeSignalIn struct {
+	From       string `json:"from" jsonschema:"node that emits the signal, relative to the scene root"`
+	Signal     string `json:"signal" jsonschema:"signal name, e.g. \"pressed\" or \"body_entered\""`
+	To         string `json:"to" jsonschema:"node whose method the signal calls"`
+	Method     string `json:"method" jsonschema:"method on the target; it must already exist in its script or class"`
+	Disconnect bool   `json:"disconnect,omitempty" jsonschema:"remove the connection instead of adding it"`
+}
+
 type screenshotIn struct {
 	Viewport string `json:"viewport,omitempty" jsonschema:"\"2d\", \"3d\" or \"auto\" (default: 3d when the scene root is a Node3D, else 2d)"`
 	MaxWidth int    `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
@@ -512,6 +520,13 @@ func (s *Server) addEditorTools() {
 		Description: "Delete a node and its children from the edited scene. The user can undo it with Ctrl+Z until the scene is closed.",
 		Annotations: destructive,
 	}, "node_delete", 15*time.Second)
+
+	addEditorTool[nodeSignalIn](s, &mcp.Tool{
+		Name: "node_signal_connect",
+		Description: "Connect a signal of one node in the edited scene to a method of another, or disconnect it, as the editor's Node dock does. " +
+			"The connection is saved with the scene and the user can undo it with Ctrl+Z. Add the method to the target's script first.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(false)},
+	}, "node_signal_connect", 15*time.Second)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "editor_screenshot",

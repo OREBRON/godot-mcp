@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 19 {
-		t.Errorf("got %d tools, want 19", len(tools.Tools))
+	if len(tools.Tools) != 20 {
+		t.Errorf("got %d tools, want 20", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -272,8 +272,23 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
 	fails("node_get", map[string]any{"node_path": "Hero/Temp"}, "NODE_NOT_FOUND")
 
+	// Signals: connect, saved with the scene.
+	con := ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "take_hit"})
+	if conJSON, _ := json.Marshal(con["connections"]); string(conJSON) != `[{"method":"take_hit","to":"Player"}]` {
+		t.Errorf("connections after connect = %s", conJSON)
+	}
+	ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "take_hit"}) // again: no-op
+	fails("node_signal_connect", map[string]any{"from": "Hero", "signal": "explode", "to": "Player", "method": "take_hit"}, "SIGNAL_NOT_FOUND")
+	fails("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "fly"}, "METHOD_NOT_FOUND")
+
 	ok("scene_save", nil)
 	saved, err := os.ReadFile(filepath.Join(proj, "levels", "test_level.tscn"))
+	if !strings.Contains(string(saved), `[connection signal="visibility_changed" from="Hero" to="Player" method="take_hit"]`) {
+		t.Errorf("the saved scene lacks the connection:\n%s", saved)
+	}
+	if r := ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "take_hit", "disconnect": true}); r["connected"] != false || len(r["connections"].([]any)) != 0 {
+		t.Errorf("disconnect = %v", r)
+	}
 	if err != nil || !strings.Contains(string(saved), `name="Hero"`) || !strings.Contains(string(saved), "player.tscn") {
 		t.Errorf("saved scene: %v\n%s", err, saved)
 	}
