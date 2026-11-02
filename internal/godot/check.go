@@ -217,24 +217,46 @@ func attributeIssues(issues []Issue, scripts []string, runnerDir string) (byFile
 	byFile = map[string][]Issue{}
 	failedLoad := map[string]Issue{}
 	for _, is := range issues {
-		switch {
-		case is.Severity != "error" || strings.HasPrefix(is.File, runnerDir):
-		case strings.HasPrefix(is.Message, "Failed to load script") && listed[is.File]:
-			// Usually repeats the parse errors above it; kept for files that
-			// got no other error.
+		switch issueKind(is, listed, runnerDir) {
+		case kindFailedLoad:
 			failedLoad[is.File] = is
-		case listed[is.File]:
+		case kindFile:
 			byFile[is.File] = append(byFile[is.File], is)
-		default:
+		case kindOther:
 			other = append(other, is)
 		}
 	}
+	keepLoneFailures(byFile, failedLoad)
+	return byFile, other
+}
+
+// keepLoneFailures adds a file's "Failed to load script" line only when the
+// file got no other error; usually it repeats the parse errors above it.
+func keepLoneFailures(byFile map[string][]Issue, failedLoad map[string]Issue) {
 	for file, is := range failedLoad {
 		if len(byFile[file]) == 0 {
 			byFile[file] = []Issue{is}
 		}
 	}
-	return byFile, other
+}
+
+const (
+	kindSkip       = iota // warnings, and the checker's own errors
+	kindFailedLoad        // Godot's "Failed to load script" summary
+	kindFile              // an error in a checked script
+	kindOther             // an error that names no checked script
+)
+
+func issueKind(is Issue, listed map[string]bool, runnerDir string) int {
+	switch {
+	case is.Severity != "error" || strings.HasPrefix(is.File, runnerDir):
+		return kindSkip
+	case !listed[is.File]:
+		return kindOther
+	case strings.HasPrefix(is.Message, "Failed to load script"):
+		return kindFailedLoad
+	}
+	return kindFile
 }
 
 func buildResult(loaded []loadedScript, byFile map[string][]Issue, other []Issue) CheckResult {
