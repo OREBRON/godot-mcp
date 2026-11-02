@@ -43,21 +43,26 @@ func main() {
 	case "config":
 		printConfig(*projectFlag, *godotFlag)
 	default:
-		dir, err := findProject(*projectFlag)
-		if err != nil {
-			slog.Warn("no Godot project yet; tools will report it", "err", err)
-		}
-		s := server.New(server.Options{ProjectDir: dir, ProjectErr: err, GodotPath: *godotFlag})
-		// Clients and supervisors stop servers with SIGTERM as often as with
-		// Ctrl+C. Both must reach the normal shutdown, which ends the game:
-		// it runs in its own process group and would outlive the server.
-		// (Windows delivers neither; there the client closes stdin.)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		if err := s.Run(ctx); err != nil && ctx.Err() == nil {
-			slog.Error("server stopped", "err", err)
-			os.Exit(1)
-		}
+		serve(*projectFlag, *godotFlag)
+	}
+}
+
+// serve runs the MCP server on stdin/stdout until the client goes away.
+func serve(projectFlag, godotPath string) {
+	dir, err := findProject(projectFlag)
+	if err != nil {
+		slog.Warn("no Godot project yet; tools will report it", "err", err)
+	}
+	s := server.New(server.Options{ProjectDir: dir, ProjectErr: err, GodotPath: godotPath})
+	// Clients and supervisors stop servers with SIGTERM as often as with
+	// Ctrl+C. Both must reach the normal shutdown, which ends the game:
+	// it runs in its own process group and would outlive the server.
+	// (Windows delivers neither; there the client closes stdin.)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := s.Run(ctx); err != nil && ctx.Err() == nil {
+		slog.Error("server stopped", "err", err)
+		os.Exit(1)
 	}
 }
 

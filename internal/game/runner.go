@@ -75,16 +75,7 @@ func (r *Runner) Start(e godot.Exec, dir string, opts StartOptions) error {
 	if r.cmd != nil && r.exitCode == nil {
 		return ErrRunning
 	}
-	args := []string{"--path", dir}
-	if opts.Headless {
-		args = append(args, "--headless")
-	}
-	if opts.Scene != "" {
-		args = append(args, opts.Scene)
-	}
-	if len(opts.Args) > 0 {
-		args = append(append(args, "--"), opts.Args...)
-	}
+	args := godotArgs(dir, opts)
 	cmd := e.Command(context.Background(), args...)
 	cmd.Dir = dir
 	if len(opts.Env) > 0 {
@@ -103,26 +94,43 @@ func (r *Runner) Start(e godot.Exec, dir string, opts StartOptions) error {
 	r.exitCode, r.lines, r.total = nil, nil, 0
 	r.done = make(chan struct{})
 
-	done, link := r.done, opts.Link
-	go func() {
-		cmd.Wait()
-		if link != nil {
-			link.Close()
-		}
-		stdout.flush()
-		stderr.flush()
-		code := -1 // ended by a signal
-		if cmd.ProcessState != nil {
-			code = cmd.ProcessState.ExitCode()
-		}
-		r.mu.Lock()
-		if r.cmd == cmd {
-			r.exitCode = &code
-		}
-		r.mu.Unlock()
-		close(done)
-	}()
+	go r.wait(cmd, r.done, opts.Link, stdout, stderr)
 	return nil
+}
+
+// godotArgs is `--path dir [--headless] [scene] [-- args]`.
+func godotArgs(dir string, opts StartOptions) []string {
+	args := []string{"--path", dir}
+	if opts.Headless {
+		args = append(args, "--headless")
+	}
+	if opts.Scene != "" {
+		args = append(args, opts.Scene)
+	}
+	if len(opts.Args) > 0 {
+		args = append(append(args, "--"), opts.Args...)
+	}
+	return args
+}
+
+// wait records how cmd's run ended, then closes done.
+func (r *Runner) wait(cmd *exec.Cmd, done chan struct{}, link *Link, stdout, stderr *lineWriter) {
+	cmd.Wait()
+	if link != nil {
+		link.Close()
+	}
+	stdout.flush()
+	stderr.flush()
+	code := -1 // ended by a signal
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	}
+	r.mu.Lock()
+	if r.cmd == cmd {
+		r.exitCode = &code
+	}
+	r.mu.Unlock()
+	close(done)
 }
 
 // add stores one line of output for cmd's run.

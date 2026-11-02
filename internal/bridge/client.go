@@ -127,54 +127,75 @@ func (c *Client) Connect(ctx context.Context) (Hello, error) {
 	if c.peer != nil && c.peer.Alive() {
 		return c.hello, nil
 	}
+	info, err := c.usableInfo()
+	if err != nil {
+		return Hello{}, err
+	}
+	conn, err := dial(ctx, info.Port)
+	if err != nil {
+		return Hello{}, err
+	}
+	hello, err := handshake(ctx, conn, info.Token)
+	if err != nil {
+		conn.CloseNow()
+		return Hello{}, err
+	}
+	c.peer = NewPeer(conn, "the editor", editorHints)
+	c.hello = hello
+	return hello, nil
+}
+
+// usableInfo reads bridge.json and checks that it speaks our protocol.
+func (c *Client) usableInfo() (Info, error) {
 	info, err := c.ReadInfo()
 	if errors.Is(err, os.ErrNotExist) {
-		return Hello{}, fmt.Errorf("%w: %s does not exist, so the godot_mcp plugin is not running for this project", ErrNotConnected, c.infoPath)
+		return info, fmt.Errorf("%w: %s does not exist, so the godot_mcp plugin is not running for this project", ErrNotConnected, c.infoPath)
 	}
 	if err != nil {
-		return Hello{}, fmt.Errorf("%w: reading %s: %v", ErrNotConnected, c.infoPath, err)
+		return info, fmt.Errorf("%w: reading %s: %v", ErrNotConnected, c.infoPath, err)
 	}
 	if info.Protocol != Protocol {
-		return Hello{}, fmt.Errorf("%w: the plugin speaks bridge protocol %d but this server speaks %d; update both to the same release", ErrNotConnected, info.Protocol, Protocol)
+		return info, fmt.Errorf("%w: the plugin speaks bridge protocol %d but this server speaks %d; update both to the same release", ErrNotConnected, info.Protocol, Protocol)
 	}
+	return info, nil
+}
 
-	dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+func dial(ctx context.Context, port int) (*websocket.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	// 127.0.0.1, never "localhost": localhost can resolve to ::1 first while
 	// the plugin listens on IPv4 only.
-	conn, _, err := websocket.Dial(dctx, "ws://127.0.0.1:"+strconv.Itoa(info.Port), nil)
+	conn, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+strconv.Itoa(port), nil)
 	if err != nil {
-		return Hello{}, fmt.Errorf("%w: nothing answers on 127.0.0.1:%d (bridge.json may be left over from an editor that crashed): %v", ErrNotConnected, info.Port, err)
+		return nil, fmt.Errorf("%w: nothing answers on 127.0.0.1:%d (bridge.json may be left over from an editor that crashed): %v", ErrNotConnected, port, err)
 	}
 	conn.SetReadLimit(64 << 20) // screenshots are large
+	return conn, nil
+}
 
-	auth, _ := json.Marshal(map[string]any{"type": "auth", "token": info.Token, "protocol": Protocol})
-	if err := conn.Write(dctx, websocket.MessageText, auth); err != nil {
-		conn.CloseNow()
+// handshake proves the token and reads the plugin's hello.
+func handshake(ctx context.Context, conn *websocket.Conn, token string) (Hello, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	auth, _ := json.Marshal(map[string]any{"type": "auth", "token": token, "protocol": Protocol})
+	if err := conn.Write(ctx, websocket.MessageText, auth); err != nil {
 		return Hello{}, fmt.Errorf("%w: sending auth: %v", ErrNotConnected, err)
 	}
-	hctx, hcancel := context.WithTimeout(ctx, 5*time.Second)
-	defer hcancel()
-	_, data, err := conn.Read(hctx)
+	_, data, err := conn.Read(ctx)
 	if err != nil {
-		conn.CloseNow()
 		return Hello{}, fmt.Errorf("%w: no handshake reply from the editor: %v", ErrNotConnected, err)
 	}
 	var r response
 	if err := json.Unmarshal(data, &r); err != nil {
-		conn.CloseNow()
 		return Hello{}, fmt.Errorf("%w: bad handshake reply: %v", ErrNotConnected, err)
 	}
-	if r.Type != "hello" {
-		conn.CloseNow()
-		if r.Error != nil {
-			return Hello{}, fmt.Errorf("%w: %v", ErrNotConnected, r.Error)
-		}
-		return Hello{}, fmt.Errorf("%w: unexpected handshake reply %q", ErrNotConnected, r.Type)
+	if r.Type == "hello" {
+		return Hello{Protocol: r.Protocol, GodotVersion: r.GodotVersion, PluginVersion: r.PluginVersion, Commands: r.Commands}, nil
 	}
-	c.peer = NewPeer(conn, "the editor", editorHints)
-	c.hello = Hello{Protocol: r.Protocol, GodotVersion: r.GodotVersion, PluginVersion: r.PluginVersion, Commands: r.Commands}
-	return c.hello, nil
+	if r.Error != nil {
+		return Hello{}, fmt.Errorf("%w: %v", ErrNotConnected, r.Error)
+	}
+	return Hello{}, fmt.Errorf("%w: unexpected handshake reply %q", ErrNotConnected, r.Type)
 }
 
 // Call sends a command and waits for its answer. It connects first when
