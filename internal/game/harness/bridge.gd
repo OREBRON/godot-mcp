@@ -174,8 +174,51 @@ func _rel(node: Node) -> String:
 	return str(node.get_path())
 
 
-func _describe(node: Node, depth_left: int, count: Array[int]) -> Dictionary:
-	count[0] += 1
+## A scene_tree page: the walk counts nodes in pre-order, shows at most
+## limit of them from offset on, and records where the next page starts.
+class TreeWalk:
+	var offset: int = 0
+	var index: int = 0
+	var shown: int = 0
+	var limit: int = MAX_TREE_NODES
+	var next: int = -1
+
+
+## Describes node and its children down to depth_left levels. A node before
+## the page is kept only as a name and path above shown nodes; {} means
+## nothing of it is on the page.
+func _describe(node: Node, depth_left: int, walk: TreeWalk) -> Dictionary:
+	var on_page: bool = walk.index >= walk.offset
+	walk.index += 1
+	walk.shown += int(on_page)
+	var d: Dictionary = _node_info(node) if on_page else {"name": str(node.name), "path": _rel(node)}
+	var kids: Array[Node] = []
+	for child: Node in node.get_children():
+		if child != self:
+			kids.append(child)
+	if not kids.is_empty():
+		d["child_count"] = kids.size()
+	var children: Array[Dictionary] = []
+	if depth_left > 0:
+		children = _describe_children(kids, depth_left - 1, walk)
+	if not children.is_empty():
+		d["children"] = children
+	return d if on_page or not children.is_empty() else {}
+
+
+func _describe_children(kids: Array[Node], depth_left: int, walk: TreeWalk) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for child: Node in kids:
+		if walk.shown >= walk.limit:
+			walk.next = walk.index
+			break
+		var d: Dictionary = _describe(child, depth_left, walk)
+		if not d.is_empty():
+			out.append(d)
+	return out
+
+
+func _node_info(node: Node) -> Dictionary:
 	var d: Dictionary = {"name": str(node.name), "type": node.get_class(), "path": _rel(node)}
 	var script: Script = node.get_script()
 	if script != null:
@@ -188,22 +231,6 @@ func _describe(node: Node, depth_left: int, count: Array[int]) -> Dictionary:
 		var spatial: Node3D = node
 		if not spatial.visible:
 			d["visible"] = false
-	var kids: Array[Node] = []
-	for child: Node in node.get_children():
-		if child != self:
-			kids.append(child)
-	if kids.is_empty():
-		return d
-	if depth_left <= 0 or count[0] >= MAX_TREE_NODES:
-		d["child_count"] = kids.size()
-		return d
-	var children: Array[Dictionary] = []
-	for child: Node in kids:
-		if count[0] >= MAX_TREE_NODES:
-			d["children_not_shown"] = kids.size() - children.size()
-			break
-		children.append(_describe(child, depth_left - 1, count))
-	d["children"] = children
 	return d
 
 
@@ -215,16 +242,20 @@ func _scene_tree(params: Dictionary) -> Dictionary:
 	var depth: int = _int_param(params, "max_depth", 4)
 	if depth <= 0:
 		depth = 4
-	var count: Array[int] = [0]
-	var tree: Dictionary = _describe(node, depth, count)
+	var walk: TreeWalk = TreeWalk.new()
+	walk.offset = maxi(_int_param(params, "offset", 0), 0)
+	walk.limit = clampi(_int_param(params, "limit", MAX_TREE_NODES), 1, MAX_TREE_NODES)
+	var tree: Dictionary = _describe(node, depth, walk)
 	var scene: Node = get_tree().current_scene
-	return {
+	var out: Dictionary = {
 		"scene": scene.scene_file_path if scene != null else "",
 		"paused": get_tree().paused,
 		"tree": tree,
-		"nodes_shown": count[0],
-		"limit_reached": count[0] >= MAX_TREE_NODES,
+		"nodes_shown": walk.shown,
 	}
+	if walk.next >= 0:
+		out["next_offset"] = walk.next
+	return out
 
 
 func _node_get(params: Dictionary) -> Dictionary:

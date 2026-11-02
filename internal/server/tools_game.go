@@ -173,7 +173,7 @@ func (s *Server) addLiveGameTools() {
 	addGameTool[gameSceneTreeIn](s, &mcp.Tool{
 		Name: "game_scene_tree",
 		Description: "Show the live node tree of the game started by game_run: what exists right now, including nodes created at runtime. " +
-			"Paths are relative to the current scene; absolute paths such as \"/root/Game\" reach autoloads. Read values with game_node_get.",
+			"Paths are relative to the current scene; absolute paths such as \"/root/Game\" reach autoloads. Read values with game_node_get. An answer shows at most 500 nodes; next_offset, when present, reads the rest.",
 		Annotations: readOnly,
 	}, "scene_tree", 15*time.Second)
 	addGameTool[gameNodeGetIn](s, &mcp.Tool{
@@ -275,6 +275,8 @@ type gameTimeIn struct {
 type gameSceneTreeIn struct {
 	NodePath string `json:"node_path,omitempty" jsonschema:"node to start from: relative to the current scene (\".\", the default, is its root) or absolute such as \"/root/Game\" for an autoload"`
 	MaxDepth int    `json:"max_depth,omitempty" jsonschema:"levels below node_path to include (default 4)"`
+	Offset   int    `json:"offset,omitempty" jsonschema:"skip this many nodes, counted in tree order; pass the next_offset of the previous answer to read the next page"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"most nodes in one answer (default and at most 500)"`
 }
 
 type gameNodeGetIn struct {

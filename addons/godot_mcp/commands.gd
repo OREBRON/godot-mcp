@@ -214,27 +214,52 @@ func _filesystem_scan(_p: Dictionary) -> Dictionary:
 	return {"scanned": true, "ms": Time.get_ticks_msec() - start}
 
 
-func _describe(node: Node, depth_left: int, count: Array) -> Dictionary:
-	count[0] += 1
+## A scene_tree page: the walk counts nodes in pre-order, shows at most
+## limit of them from offset on, and records where the next page starts.
+class TreeWalk:
+	var offset := 0
+	var index := 0
+	var shown := 0
+	var limit := MAX_TREE_NODES
+	var next := -1
+
+
+## Describes node and its children down to depth_left levels. A node before
+## the page is kept only as a name and path above shown nodes; {} means
+## nothing of it is on the page.
+func _describe(node: Node, depth_left: int, walk: TreeWalk) -> Dictionary:
+	var on_page := walk.index >= walk.offset
+	walk.index += 1
+	walk.shown += int(on_page)
+	var d := _node_info(node) if on_page else {"name": str(node.name), "path": _rel(node)}
+	var kids := _owned_children(node)
+	if not kids.is_empty():
+		d["child_count"] = kids.size()
+	var children := _describe_children(kids, depth_left - 1, walk) if depth_left > 0 else []
+	if not children.is_empty():
+		d["children"] = children
+	return d if on_page or not children.is_empty() else {}
+
+
+func _describe_children(kids: Array, depth_left: int, walk: TreeWalk) -> Array:
+	var out := []
+	for c in kids:
+		if walk.shown >= walk.limit:
+			walk.next = walk.index
+			break
+		var d := _describe(c, depth_left, walk)
+		if not d.is_empty():
+			out.append(d)
+	return out
+
+
+func _node_info(node: Node) -> Dictionary:
 	var d := {"name": str(node.name), "type": node.get_class(), "path": _rel(node)}
 	var script: Script = node.get_script()
 	if script != null:
 		d["script"] = script.resource_path
 	if node != _root() and not node.scene_file_path.is_empty():
 		d["instance"] = node.scene_file_path
-	var kids := _owned_children(node)
-	if kids.is_empty():
-		return d
-	if depth_left <= 0 or count[0] >= MAX_TREE_NODES:
-		d["child_count"] = kids.size()
-		return d
-	var children := []
-	for c in kids:
-		if count[0] >= MAX_TREE_NODES:
-			d["children_not_shown"] = kids.size() - children.size()
-			break
-		children.append(_describe(c, depth_left - 1, count))
-	d["children"] = children
 	return d
 
 
@@ -245,9 +270,13 @@ func _scene_tree(p: Dictionary) -> Dictionary:
 	var depth := int(p.get("max_depth", 4))
 	if depth <= 0:
 		depth = 4
-	var count := [0]
-	var tree := _describe(node, depth, count)
-	return {"scene": _root().scene_file_path, "tree": tree, "nodes_shown": count[0], "limit_reached": count[0] >= MAX_TREE_NODES}
+	var walk := TreeWalk.new()
+	walk.offset = maxi(int(p.get("offset", 0)), 0)
+	walk.limit = clampi(int(p.get("limit", MAX_TREE_NODES)), 1, MAX_TREE_NODES)
+	var out := {"scene": _root().scene_file_path, "tree": _describe(node, depth, walk), "nodes_shown": walk.shown}
+	if walk.next >= 0:
+		out["next_offset"] = walk.next
+	return out
 
 
 func _node_get(p: Dictionary) -> Dictionary:

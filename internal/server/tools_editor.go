@@ -10,6 +10,8 @@ import (
 type sceneTreeIn struct {
 	NodePath string `json:"node_path,omitempty" jsonschema:"node to start from, relative to the scene root (default \".\", the root)"`
 	MaxDepth int    `json:"max_depth,omitempty" jsonschema:"levels below node_path to include (default 4); deeper nodes report only child_count"`
+	Offset   int    `json:"offset,omitempty" jsonschema:"skip this many nodes, counted in tree order; pass the next_offset of the previous answer to read the next page"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"most nodes in one answer (default and at most 500)"`
 }
 
 type nodeGetIn struct {
@@ -105,7 +107,7 @@ func (s *Server) addSceneTools() {
 	addEditorTool[sceneTreeIn](s, &mcp.Tool{
 		Name: "scene_tree",
 		Description: "Show the node tree of the scene open in the editor: name, class, path, attached script and instanced scene of each node. " +
-			"Use the returned paths as node_path in other tools.",
+			"Use the returned paths as node_path in other tools. An answer shows at most 500 nodes; next_offset, when present, reads the rest.",
 		Annotations: readOnly,
 	}, "scene_tree", 15*time.Second)
 	addEditorTool[sceneOpenIn](s, &mcp.Tool{

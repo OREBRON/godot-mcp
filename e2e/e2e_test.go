@@ -15,10 +15,12 @@ import (
 	"image"
 	"image/png"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -155,6 +157,45 @@ func (s *session) ok(name string, args map[string]any) map[string]any {
 	return m
 }
 
+// checkPaging reads tool's tree one node per page and checks that the pages
+// together show the nodes of one full answer, in the same order.
+func (s *session) checkPaging(tool string, args map[string]any) {
+	s.t.Helper()
+	var want, got []string
+	shownPaths(s.ok(tool, args)["tree"], &want)
+	page := map[string]any{"limit": 1}
+	maps.Copy(page, args)
+	for offset := 0; ; {
+		page["offset"] = offset
+		r := s.ok(tool, page)
+		shownPaths(r["tree"], &got)
+		next, more := r["next_offset"].(float64)
+		if !more {
+			break
+		}
+		if int(next) <= offset || len(got) > len(want) {
+			s.t.Fatalf("%s pages do not advance: offset %d gave next_offset %v", tool, offset, next)
+		}
+		offset = int(next)
+	}
+	if len(want) < 2 || !slices.Equal(got, want) {
+		s.t.Errorf("%s one node per page showed %v, one answer %v", tool, got, want)
+	}
+}
+
+// shownPaths lists the paths of the nodes a tree answer shows in full;
+// nodes from earlier pages carry no type.
+func shownPaths(tree any, out *[]string) {
+	d, _ := tree.(map[string]any)
+	if _, shown := d["type"]; shown {
+		*out = append(*out, d["path"].(string))
+	}
+	kids, _ := d["children"].([]any)
+	for _, k := range kids {
+		shownPaths(k, out)
+	}
+}
+
 func (s *session) fails(name string, args map[string]any, want string) {
 	s.t.Helper()
 	text, isErr := s.call(name, args)
@@ -275,6 +316,7 @@ func TestEndToEnd(t *testing.T) {
 	if strings.Contains(string(treeJSON), `"Shape"`) {
 		t.Errorf("scene_tree shows the inside of an instanced scene: %s", treeJSON)
 	}
+	s.checkPaging("scene_tree", nil)
 
 	ok("node_add", map[string]any{"type": "Node2D", "name": "Temp", "parent_path": "Hero"})
 	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
@@ -453,6 +495,7 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("game_scene_tree lacks %s: %s", want, liveJSON)
 		}
 	}
+	s.checkPaging("game_scene_tree", nil)
 	rootJSON, _ := json.Marshal(ok("game_scene_tree", map[string]any{"node_path": "/root", "max_depth": 1}))
 	if !strings.Contains(string(rootJSON), `"name":"Main"`) || strings.Contains(string(rootJSON), "GodotMCPBridge") {
 		t.Errorf("game_scene_tree of /root: %s", rootJSON)

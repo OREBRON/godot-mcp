@@ -74,7 +74,7 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `game_run` | no | Runs the project or one scene, optionally headless. Returns the first output and parsed errors. |
 | `game_output` | no | Reads more output using a cursor (`next_since`). `errors_only` returns just the errors. |
 | `game_stop` | no | Stops the game and every process it started. |
-| `game_scene_tree` | no | Live node tree of the running game, runtime nodes included. Absolute paths such as `/root/Game` reach autoloads. |
+| `game_scene_tree` | no | Live node tree of the running game, runtime nodes included. Absolute paths such as `/root/Game` reach autoloads. Pages of up to 500 nodes (`offset`, `next_offset`). |
 | `game_node_get` | no | Live properties and script variables of a node in the running game. |
 | `game_node_set` | no | Sets live properties to set up a situation to test, all or none. Nothing is saved. |
 | `game_wait` | no | Waits until a node exists, a signal is emitted or a property reaches a value, with a timeout. |
@@ -82,7 +82,7 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `game_input` | no | Sends an InputMap action, a key, a mouse click or a mouse move. Pressed and released by default; `pressed` sends one half to hold an input. |
 | `game_time` | no | Pauses, resumes, or steps exactly N physics frames and pauses again, for checks that come out the same every run. |
 | `game_screenshot` | no (windowed game) | PNG of the game's current frame, with the logical size `game_input` positions use. |
-| `scene_tree` | yes | Node tree of the edited scene: names, classes, scripts and instanced scenes. |
+| `scene_tree` | yes | Node tree of the edited scene: names, classes, scripts and instanced scenes. Pages of up to 500 nodes (`offset`, `next_offset`). |
 | `node_get` | yes | Properties of a node. By default only the ones that differ from their defaults. |
 | `scene_open` / `scene_create` / `scene_save` | yes | Opens, creates and saves scenes. |
 | `node_add` | yes | Adds a node by class (built-in or `class_name`) or instances a `.tscn`, optionally setting properties. |
