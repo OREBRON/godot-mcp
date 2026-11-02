@@ -73,6 +73,7 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `game_stop` | no | Stops the game and every process it started. |
 | `game_scene_tree` | no | Live node tree of the running game, runtime nodes included. Absolute paths such as `/root/Game` reach autoloads. |
 | `game_node_get` | no | Live properties and script variables of a node in the running game. |
+| `game_node_set` | no | Sets live properties to set up a situation to test, all or none. Nothing is saved. |
 | `game_input` | no | Sends an InputMap action, a key, a mouse click or a mouse move. Pressed and released by default; `pressed` sends one half to hold an input. |
 | `game_time` | no | Pauses, resumes, or steps exactly N physics frames and pauses again, for checks that come out the same every run. |
 | `game_screenshot` | no (windowed game) | PNG of the game's current frame, with the logical size `game_input` positions use. |
@@ -80,8 +81,11 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `node_get` | yes | Properties of a node. By default only the ones that differ from their defaults. |
 | `scene_open` / `scene_create` / `scene_save` | yes | Opens, creates and saves scenes. |
 | `node_add` | yes | Adds a node by class (built-in or `class_name`) or instances a `.tscn`, optionally setting properties. |
-| `node_set_properties` | yes | Sets several properties in one undoable action. Accepts JSON values or Godot's text form, and `res://` paths for resources and scripts. |
+| `node_set_properties` | yes | Sets several properties in one undoable action. Accepts JSON values or Godot's text form, `res://` paths for resources and scripts, and new resources inline: `{"type": "RectangleShape2D", "size": [16, 16]}`. |
 | `node_delete` | yes | Deletes a node and its children. Undoable. |
+| `node_signal_connect` | yes | Connects (or disconnects) a signal to a method, saved with the scene, as the Node dock does. Undoable. |
+| `project_settings_get` / `project_settings_set` | yes | Reads settings by prefix or name; changes existing ones and saves `project.godot`. Undoable. |
+| `input_action_set` | yes | Creates, replaces or removes an input action with keys (physical), mouse buttons and joypad buttons. Undoable. |
 | `editor_screenshot` | yes (windowed) | PNG of the editor's 2D or 3D viewport. |
 
 Errors carry a stable `code` plus a `hint` that says what to do next. For example, `NODE_NOT_FOUND` lists the children that do exist at that path, and `PROPERTY_NOT_FOUND` suggests properties with similar names.
@@ -162,7 +166,8 @@ Two safety measures:
 
 ## Roadmap
 
-- Setting properties in the running game, for checks such as "teleport the player next to the door".
+- Running GUT or gdUnit4 tests and returning their results.
+- Creating instances of `class_name` resources inline, as built-in resources can be now.
 - An editor dock with a **Configure** button that downloads the right binary and writes the client configuration.
 - Publishing on the Godot Asset Library, Homebrew, Scoop and winget.
 - Signed and notarized binaries for macOS and Windows.
