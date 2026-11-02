@@ -200,6 +200,26 @@ static func _new_resource(spec: Dictionary, info: Dictionary) -> Dictionary:
 	return {"value": res}
 
 
+## A new object of a class_name class, or null. Like the editor's own dialogs
+## it builds the native base class and attaches the script: in the editor a
+## script without @tool cannot be instantiated with new().
+static func instantiate_script_class(type: String) -> Object:
+	var path := _global_class_path(type)
+	var script := load(path) as Script if not path.is_empty() else null
+	if script == null or not ClassDB.can_instantiate(script.get_instance_base_type()):
+		return null
+	var obj := ClassDB.instantiate(script.get_instance_base_type()) as Object
+	obj.set_script(script)
+	return obj
+
+
+static func _global_class_path(type: String) -> String:
+	for g in ProjectSettings.get_global_class_list():
+		if g["class"] == type:
+			return g["path"]
+	return ""
+
+
 static func _set_field(obj: Object, name: String, value: Variant) -> String:
 	var field := property_info(obj, name)
 	if field.is_empty():

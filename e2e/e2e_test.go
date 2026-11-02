@@ -189,6 +189,14 @@ func TestEndToEnd(t *testing.T) {
 	}
 	ok("node_add", map[string]any{"scene": "res://demo/player.tscn", "properties": map[string]any{"speed": 50}})
 	fails("node_add", map[string]any{"type": "Sprit2D"}, "Sprite2D")
+	// A class_name class, which a non-tool script cannot instance with new() in the editor.
+	if r := ok("node_add", map[string]any{"type": "DemoPlayer", "name": "Rival"}); r["type"] != "CharacterBody2D" {
+		t.Errorf("node_add DemoPlayer = %v", r)
+	}
+	if p := ok("node_get", map[string]any{"node_path": "Rival", "properties": []any{"script"}})["properties"].(map[string]any); p["script"] != "res://demo/player.gd" {
+		t.Errorf("the DemoPlayer node has no player script: %v", p)
+	}
+	ok("node_delete", map[string]any{"node_path": "Rival"})
 	fails("node_add", map[string]any{"type": "Resource"}, "INVALID_TYPE")
 	fails("node_add", map[string]any{"parent_path": "Nope/Deeper", "type": "Node"}, "NODE_NOT_FOUND")
 	// ".." must not reach the editor's own nodes above the scene root.

@@ -148,9 +148,9 @@ func _similar_properties(obj: Object, name: String) -> String:
 func _instantiate_type(type: String) -> Variant:
 	if ClassDB.class_exists(type):
 		return _instantiate_builtin(type)
-	for g in ProjectSettings.get_global_class_list():
-		if g["class"] == type:
-			return _instantiate_script_class(type, g["path"])
+	var obj := Codec.instantiate_script_class(type)
+	if obj != null:
+		return obj if obj is Node else _fail("INVALID_TYPE", "the script class %s does not extend Node" % type)
 	var close := Array(ClassDB.get_inheriters_from_class("Node")).filter(func(c: String) -> bool: return c.similarity(type) > 0.6 or c.to_lower() == type.to_lower())
 	return _fail("INVALID_TYPE", "unknown class \"%s\"" % type, ("did you mean: %s" % ", ".join(close.slice(0, 5))) if not close.is_empty() else "use a built-in class such as Node2D or Sprite2D, or a class_name from your scripts")
 
@@ -161,16 +161,6 @@ func _instantiate_builtin(type: String) -> Variant:
 	if not ClassDB.can_instantiate(type):
 		return _fail("INVALID_TYPE", "%s is abstract and cannot be created" % type, "pick one of its subclasses: %s" % ", ".join(ClassDB.get_inheriters_from_class(type).slice(0, 10)))
 	return ClassDB.instantiate(type)
-
-
-func _instantiate_script_class(type: String, path: String) -> Variant:
-	var script := load(path) as Script
-	if script == null or not script.can_instantiate():
-		return _fail("INVALID_TYPE", "the script class %s (%s) cannot be instantiated" % [type, path], "run script_check on it")
-	var obj = script.new()
-	if not (obj is Node):
-		return _fail("INVALID_TYPE", "the script class %s does not extend Node" % type)
-	return obj
 
 
 ## Converts and checks every property first, so that a bad value changes
