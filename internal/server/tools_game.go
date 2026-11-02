@@ -202,6 +202,12 @@ func (s *Server) addLiveGameTools() {
 			"to watch input act frame by frame, send it with pressed true, call game_time step, then send pressed false.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), OpenWorldHint: ptr(false)},
 	}, "input", time.Minute)
+	addGameTool[gamePerformanceIn](s, &mcp.Tool{
+		Name: "game_performance",
+		Description: "Measure the game started by game_run: frame rate over sample_seconds of real time, process and physics time, node and orphan-node counts, memory and draw calls. " +
+			"Measure a windowed game: a headless one is paced by Godot's sleep and draws nothing, so its numbers say little.",
+		Annotations: readOnly,
+	}, "performance", 30*time.Second)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "game_screenshot",
 		Description: "Capture the current frame of the game started by game_run, to see what the player sees. " +
@@ -227,6 +233,10 @@ type gameInputIn struct {
 	Position    []float64 `json:"position,omitempty" jsonschema:"[x, y] in the game's viewport coordinates; on its own it moves the mouse there"`
 	Duration    *float64  `json:"duration,omitempty" jsonschema:"seconds to hold before releasing (default 0.1)"`
 	Pressed     *bool     `json:"pressed,omitempty" jsonschema:"send only the press (true) or only the release (false), to hold an input across calls such as game_time steps"`
+}
+
+type gamePerformanceIn struct {
+	SampleSeconds *float64 `json:"sample_seconds,omitempty" jsonschema:"seconds of real time to count frames over (default 1, 0.1 to 10)"`
 }
 
 type gameNodeSetIn struct {

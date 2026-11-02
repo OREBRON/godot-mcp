@@ -31,6 +31,7 @@ func _ready() -> void:
 		"time": _time,
 		"input": _input_cmd,
 		"screenshot": _screenshot,
+		"performance": _performance,
 	}
 	_ws.outbound_buffer_size = 64 << 20 # screenshots
 	_ws.inbound_buffer_size = 1 << 20
@@ -607,4 +608,39 @@ func _screenshot(params: Dictionary) -> Variant:
 		"logical_width": logical.x,
 		"logical_height": logical.y,
 		"paused": get_tree().paused,
+	}
+
+
+# ---- performance ----
+
+## Counts the frames drawn in sample_seconds of real time and reads the
+## engine's monitors. A headless run is paced by Godot's low-processor
+## sleep, so its frame rate says little about the game.
+func _performance(params: Dictionary) -> Dictionary:
+	var seconds: float = clampf(_float_param(params, "sample_seconds", 1.0), 0.1, 10.0)
+	var frames_before: int = Engine.get_process_frames()
+	var start: int = Time.get_ticks_usec()
+	await get_tree().create_timer(seconds, true, false, true).timeout
+	var frames: float = float(Engine.get_process_frames() - frames_before)
+	var elapsed: float = float(Time.get_ticks_usec() - start) / 1000000.0
+	return {
+		"measured_fps": frames / elapsed,
+		"avg_frame_ms": elapsed * 1000.0 / maxf(frames, 1.0),
+		"monitors": _monitors(),
+		"headless": DisplayServer.get_name() == "headless",
+		"paused": get_tree().paused,
+	}
+
+
+func _monitors() -> Dictionary:
+	return {
+		"fps": Performance.get_monitor(Performance.TIME_FPS),
+		"process_ms": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		"physics_ms": Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+		"nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+		"orphan_nodes": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
+		"objects": Performance.get_monitor(Performance.OBJECT_COUNT),
+		"static_memory_mb": Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
+		"draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		"video_memory_mb": Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0,
 	}

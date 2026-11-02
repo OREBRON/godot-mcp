@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 24 {
-		t.Errorf("got %d tools, want 24", len(tools.Tools))
+	if len(tools.Tools) != 25 {
+		t.Errorf("got %d tools, want 25", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -478,6 +478,10 @@ func TestEndToEnd(t *testing.T) {
 	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
 	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
 	fails("game_screenshot", nil, "NOT_AVAILABLE_HEADLESS")
+	perf := ok("game_performance", map[string]any{"sample_seconds": 0.5})
+	if mon := perf["monitors"].(map[string]any); perf["measured_fps"].(float64) <= 0 || mon["nodes"].(float64) < 3 {
+		t.Errorf("game_performance = %v", perf)
+	}
 	stop := ok("game_stop", nil)
 	if stop["stopped"] != true {
 		t.Errorf("game_stop = %v", stop)
