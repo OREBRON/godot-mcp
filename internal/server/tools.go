@@ -421,6 +421,25 @@ type nodeSignalIn struct {
 	Disconnect bool   `json:"disconnect,omitempty" jsonschema:"remove the connection instead of adding it"`
 }
 
+type projectSettingsGetIn struct {
+	Prefix      string   `json:"prefix,omitempty" jsonschema:"settings whose name starts with this, e.g. \"display/window/\" or \"input/\""`
+	Names       []string `json:"names,omitempty" jsonschema:"exact setting names to read"`
+	ChangedOnly bool     `json:"changed_only,omitempty" jsonschema:"only settings that differ from Godot's defaults"`
+}
+
+type projectSettingsSetIn struct {
+	Settings map[string]any `json:"settings" jsonschema:"setting name to value, e.g. {\"application/config/description\": \"A platformer\"}; same value format as node_set_properties"`
+}
+
+type inputActionSetIn struct {
+	Action        string   `json:"action" jsonschema:"action name, e.g. \"jump\""`
+	Keys          []string `json:"keys,omitempty" jsonschema:"keys by Godot name, e.g. [\"Space\", \"W\", \"Ctrl+S\"]; added as physical keys, as the Input Map editor does"`
+	MouseButtons  []string `json:"mouse_buttons,omitempty" jsonschema:"\"left\", \"right\", \"middle\", \"wheel_up\" or \"wheel_down\""`
+	JoypadButtons []int    `json:"joypad_buttons,omitempty" jsonschema:"joypad button indices, e.g. 0 for the bottom face button"`
+	Deadzone      *float64 `json:"deadzone,omitempty" jsonschema:"default 0.2"`
+	Remove        bool     `json:"remove,omitempty" jsonschema:"delete the action instead"`
+}
+
 type screenshotIn struct {
 	Viewport string `json:"viewport,omitempty" jsonschema:"\"2d\", \"3d\" or \"auto\" (default: 3d when the scene root is a Node3D, else 2d)"`
 	MaxWidth int    `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
@@ -520,6 +539,26 @@ func (s *Server) addEditorTools() {
 		Description: "Delete a node and its children from the edited scene. The user can undo it with Ctrl+Z until the scene is closed.",
 		Annotations: destructive,
 	}, "node_delete", 15*time.Second)
+
+	addEditorTool[projectSettingsGetIn](s, &mcp.Tool{
+		Name:        "project_settings_get",
+		Description: "Read project settings (project.godot) through the open editor. Give a prefix or names; changed_only shows only what the project overrides. Input actions are the input/ settings.",
+		Annotations: readOnly,
+	}, "project_settings_get", 15*time.Second)
+
+	addEditorTool[projectSettingsSetIn](s, &mcp.Tool{
+		Name: "project_settings_set",
+		Description: "Change existing project settings through the editor and save project.godot, as one action the user can undo with Ctrl+Z. " +
+			"Unknown names get suggestions. Some settings, such as the renderer, apply only after the editor or the game restarts.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(false)},
+	}, "project_settings_set", 30*time.Second)
+
+	addEditorTool[inputActionSetIn](s, &mcp.Tool{
+		Name: "input_action_set",
+		Description: "Create or replace an input action with its keys, mouse buttons and joypad buttons, or remove it. " +
+			"Saved to project.godot through the editor, undoable with Ctrl+Z. Games started afterwards with game_run have it, and game_input can press it.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(true), IdempotentHint: true, OpenWorldHint: ptr(false)},
+	}, "input_action_set", 30*time.Second)
 
 	addEditorTool[nodeSignalIn](s, &mcp.Tool{
 		Name: "node_signal_connect",

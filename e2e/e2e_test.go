@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 20 {
-		t.Errorf("got %d tools, want 20", len(tools.Tools))
+	if len(tools.Tools) != 23 {
+		t.Errorf("got %d tools, want 23", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -271,6 +271,31 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_add", map[string]any{"type": "Node2D", "name": "Temp", "parent_path": "Hero"})
 	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
 	fails("node_get", map[string]any{"node_path": "Hero/Temp"}, "NODE_NOT_FOUND")
+
+	// Project settings and input actions, saved to project.godot.
+	if v := ok("project_settings_get", map[string]any{"prefix": "display/window/size/viewport_"})["settings"].(map[string]any); v["display/window/size/viewport_width"] != 1152.0 {
+		t.Errorf("project_settings_get viewport = %v", v)
+	}
+	ok("project_settings_set", map[string]any{"settings": map[string]any{"application/config/description": "MCP test"}})
+	fails("project_settings_set", map[string]any{"settings": map[string]any{"display/window/size/viewport_widht": 640}}, "viewport_width")
+	fails("project_settings_set", map[string]any{"settings": map[string]any{"display/window/size/viewport_width": "wide"}}, "INVALID_VALUE")
+	fails("project_settings_get", nil, "prefix or names")
+	jump := ok("input_action_set", map[string]any{"action": "jump", "keys": []any{"Space", "W"}, "joypad_buttons": []any{0}})
+	if ev, _ := json.Marshal(jump["events"]); !strings.Contains(string(ev), "Space") || len(jump["events"].([]any)) != 3 {
+		t.Errorf("input_action_set jump = %v", jump)
+	}
+	ok("input_action_set", map[string]any{"action": "dash", "mouse_buttons": []any{"right"}})
+	ok("input_action_set", map[string]any{"action": "dash", "remove": true})
+	fails("input_action_set", map[string]any{"action": "x", "keys": []any{"Hyperdrive"}}, "unknown key")
+	godotFile, _ := os.ReadFile(filepath.Join(proj, "project.godot"))
+	for _, want := range []string{`config/description="MCP test"`, "jump={", "physical_keycode"} {
+		if !strings.Contains(string(godotFile), want) {
+			t.Errorf("project.godot lacks %s:\n%s", want, godotFile)
+		}
+	}
+	if strings.Contains(string(godotFile), "dash=") {
+		t.Errorf("the removed action dash is still in project.godot")
+	}
 
 	// Signals: connect, saved with the scene.
 	con := ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "take_hit"})
@@ -437,6 +462,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	fails("game_input", map[string]any{}, "INVALID_PARAMS")
 	fails("game_input", map[string]any{"action": "teleport"}, "no input action")
+	ok("game_input", map[string]any{"action": "jump"}) // added with input_action_set before the run
 	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
 	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
 	fails("game_screenshot", nil, "NOT_AVAILABLE_HEADLESS")

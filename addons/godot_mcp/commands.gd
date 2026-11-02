@@ -5,11 +5,13 @@ extends RefCounted
 ## A handler returns a Dictionary of data, or _fail(...) for an error.
 
 const Codec := preload("res://addons/godot_mcp/variant_codec.gd")
+const ProjectCommands := preload("res://addons/godot_mcp/project_commands.gd")
 
 const MAX_TREE_NODES := 500
 
 var _plugin: EditorPlugin
 var _handlers := {}
+var _project: ProjectCommands # kept here: its handlers do not keep it alive
 
 
 func _init(plugin: EditorPlugin) -> void:
@@ -28,6 +30,8 @@ func _init(plugin: EditorPlugin) -> void:
 		"node_signal_connect": _node_signal_connect,
 		"editor_screenshot": _editor_screenshot,
 	}
+	_project = ProjectCommands.new(plugin)
+	_handlers.merge(_project.handlers())
 
 
 func names() -> Array:

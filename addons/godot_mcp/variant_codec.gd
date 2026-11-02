@@ -17,6 +17,8 @@ static func encode(v: Variant, depth := 0) -> Variant:
 		TYPE_OBJECT:
 			if not is_instance_valid(v):
 				return null
+			if v is InputEvent:
+				return v.as_text()
 			if v is Resource:
 				var path: String = v.resource_path
 				if not path.is_empty() and not path.contains("::"):
