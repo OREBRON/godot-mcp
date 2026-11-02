@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,14 +24,45 @@ var (
 	harmless    = &mcp.ToolAnnotations{DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(false)}
 )
 
-func (s *Server) registerTools() {
-	s.addProjectTools()
-	s.addGameTools()
-	s.addLiveGameTools()
-	s.addGameControlTools()
-	s.addSceneTools()
-	s.addNodeTools()
-	s.addSettingsTools()
+// toolGroups are the sets of tools --tools chooses from, in the order they
+// are registered.
+var toolGroups = []struct {
+	name string
+	add  func(*Server)
+}{
+	{"project", (*Server).addProjectTools},
+	{"game", func(s *Server) { s.addGameTools(); s.addLiveGameTools(); s.addGameControlTools() }},
+	{"scene", (*Server).addSceneTools},
+	{"node", (*Server).addNodeTools},
+	{"settings", (*Server).addSettingsTools},
+}
+
+// ToolGroups lists the group names, for help texts and errors.
+func ToolGroups() []string {
+	names := make([]string, len(toolGroups))
+	for i, g := range toolGroups {
+		names[i] = g.name
+	}
+	return names
+}
+
+// CheckToolGroups reports the first name that is not a tool group.
+func CheckToolGroups(names []string) error {
+	for _, n := range names {
+		if !slices.Contains(ToolGroups(), n) {
+			return fmt.Errorf("unknown tool group %q; the groups are %s", n, strings.Join(ToolGroups(), ", "))
+		}
+	}
+	return nil
+}
+
+// registerTools adds the chosen groups, or all of them when none is chosen.
+func (s *Server) registerTools(groups []string) {
+	for _, g := range toolGroups {
+		if len(groups) == 0 || slices.Contains(groups, g.name) {
+			g.add(s)
+		}
+	}
 }
 
 // addGameTool registers a tool that runs a command in the game started by

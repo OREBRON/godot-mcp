@@ -33,9 +33,10 @@ const instructions = `Godot MCP drives a Godot 4 project.
 
 // Options configure a server.
 type Options struct {
-	ProjectDir string // folder holding project.godot; empty means not found
-	ProjectErr error  // why ProjectDir is empty
-	GodotPath  string // explicit Godot binary, overrides discovery
+	ProjectDir string   // folder holding project.godot; empty means not found
+	ProjectErr error    // why ProjectDir is empty
+	GodotPath  string   // explicit Godot binary, overrides discovery
+	Tools      []string // tool groups to register; empty means all
 }
 
 // Server is the godot-mcp server state.
@@ -61,7 +62,7 @@ func New(opts Options) *Server {
 			&mcp.ServerOptions{Instructions: instructions, Capabilities: &mcp.ServerCapabilities{}},
 		),
 	}
-	s.registerTools()
+	s.registerTools(opts.Tools)
 	return s
 }
 

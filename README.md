@@ -48,6 +48,8 @@ The plugin is the listener, so several agent sessions can share one open editor.
 
 Without the editor open, `project_info`, `script_check` and the `game_*` tools still work.
 
+To offer the agent fewer tools, pass `--tools` with a comma-separated list of groups, or set `GODOT_MCP_TOOLS`. The groups are `project`, `game`, `scene` (scenes, `resource_save`, `editor_screenshot`), `node` and `settings` (project settings and input actions). For example, `--tools project,game` keeps only the tools that need no editor. `godot-mcp config --tools ...` writes the flag into the configuration it prints.
+
 ### Finding Godot
 
 The server looks for Godot in this order:
