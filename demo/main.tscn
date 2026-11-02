@@ -20,3 +20,7 @@ offset_top = 60.0
 offset_right = 140.0
 offset_bottom = 100.0
 text = "Start"
+
+[node name="Tick" type="Timer" parent="."]
+wait_time = 0.5
+autostart = true

@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 25 {
-		t.Errorf("got %d tools, want 25", len(tools.Tools))
+	if len(tools.Tools) != 26 {
+		t.Errorf("got %d tools, want 26", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -379,7 +379,7 @@ func TestEndToEnd(t *testing.T) {
 	// Running the game.
 	run := ok("game_run", map[string]any{"scene": "res://demo/main.tscn", "headless": true, "wait_seconds": 3})
 	lines, _ := json.Marshal(run["lines"])
-	if !strings.Contains(string(lines), "Demo started: 3 children") {
+	if !strings.Contains(string(lines), "Demo started: 4 children") {
 		t.Errorf("game_run output = %s", lines)
 	}
 	// The game starts through the harness, whose bridge dials back.
@@ -478,6 +478,25 @@ func TestEndToEnd(t *testing.T) {
 	fails("game_input", map[string]any{"key": "Hyperdrive"}, "unknown key")
 	fails("game_input", map[string]any{"mouse_button": "left"}, "needs position")
 	fails("game_screenshot", nil, "NOT_AVAILABLE_HEADLESS")
+	// Waiting for something to happen in the game.
+	if r := ok("game_wait", map[string]any{"node_path": "Player"}); r["met"] != true {
+		t.Errorf("game_wait for an existing node = %v", r)
+	}
+	if r := ok("game_wait", map[string]any{"node_path": "Ghost", "timeout_seconds": 0.3}); r["met"] != false {
+		t.Errorf("game_wait for a missing node = %v", r)
+	}
+	if r := ok("game_wait", map[string]any{"node_path": "Tick", "signal": "timeout", "timeout_seconds": 2}); r["met"] != true {
+		t.Errorf("game_wait for the timer's signal = %v", r)
+	}
+	now := ok("game_node_get", map[string]any{"node_path": ".", "properties": []any{"ticks"}})["properties"].(map[string]any)["ticks"].(float64)
+	if r := ok("game_wait", map[string]any{"node_path": ".", "property": "ticks", "equals": now + 30, "timeout_seconds": 3}); r["met"] != true {
+		t.Errorf("game_wait for ticks to reach %v = %v", now+30, r)
+	}
+	fails("game_wait", map[string]any{"node_path": "Player", "signal": "exploded"}, "SIGNAL_NOT_FOUND")
+	ok("game_time", map[string]any{"action": "pause"})
+	fails("game_wait", map[string]any{"node_path": "Player"}, "PAUSED")
+	ok("game_time", map[string]any{"action": "resume"})
+
 	perf := ok("game_performance", map[string]any{"sample_seconds": 0.5})
 	if mon := perf["monitors"].(map[string]any); perf["measured_fps"].(float64) <= 0 || mon["nodes"].(float64) < 3 {
 		t.Errorf("game_performance = %v", perf)

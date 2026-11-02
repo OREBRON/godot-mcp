@@ -208,6 +208,12 @@ func (s *Server) addLiveGameTools() {
 			"Measure a windowed game: a headless one is paced by Godot's sleep and draws nothing, so its numbers say little.",
 		Annotations: readOnly,
 	}, "performance", 30*time.Second)
+	addGameTool[gameWaitIn](s, &mcp.Tool{
+		Name: "game_wait",
+		Description: "Wait in the game started by game_run until node_path exists, until its signal is emitted, or until its property equals a value, for up to timeout_seconds (default 5). " +
+			"A timeout returns met: false rather than an error. The game must be running, not paused; other game_* calls wait until this one returns.",
+		Annotations: readOnly,
+	}, "wait", 70*time.Second)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "game_screenshot",
 		Description: "Capture the current frame of the game started by game_run, to see what the player sees. " +
@@ -233,6 +239,14 @@ type gameInputIn struct {
 	Position    []float64 `json:"position,omitempty" jsonschema:"[x, y] in the game's viewport coordinates; on its own it moves the mouse there"`
 	Duration    *float64  `json:"duration,omitempty" jsonschema:"seconds to hold before releasing (default 0.1)"`
 	Pressed     *bool     `json:"pressed,omitempty" jsonschema:"send only the press (true) or only the release (false), to hold an input across calls such as game_time steps"`
+}
+
+type gameWaitIn struct {
+	NodePath       string   `json:"node_path" jsonschema:"node to wait for or on, relative to the current scene or absolute such as \"/root/Game\""`
+	Signal         string   `json:"signal,omitempty" jsonschema:"wait until the node emits this signal"`
+	Property       string   `json:"property,omitempty" jsonschema:"wait until this property equals equals"`
+	Equals         any      `json:"equals,omitempty" jsonschema:"the value property must reach, in game_node_set's value format"`
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty" jsonschema:"seconds of real time to wait at most (default 5, at most 60)"`
 }
 
 type gamePerformanceIn struct {

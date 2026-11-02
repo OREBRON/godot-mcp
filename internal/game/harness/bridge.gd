@@ -32,6 +32,7 @@ func _ready() -> void:
 		"input": _input_cmd,
 		"screenshot": _screenshot,
 		"performance": _performance,
+		"wait": _wait,
 	}
 	_ws.outbound_buffer_size = 64 << 20 # screenshots
 	_ws.inbound_buffer_size = 1 << 20
@@ -644,3 +645,84 @@ func _monitors() -> Dictionary:
 		"draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		"video_memory_mb": Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0,
 	}
+
+
+# ---- waiting ----
+
+## Waits until node_path exists, until its signal is emitted, or until its
+## property equals a value, for up to timeout_seconds of real time. A
+## timeout is an answer (met: false), not an error.
+func _wait(params: Dictionary) -> Variant:
+	if get_tree().paused:
+		return _fail("PAUSED", "the game is paused, so what it waits for cannot happen", "resume it with game_time, or step it instead")
+	var condition: Variant = _wait_condition(params)
+	if condition is Dictionary:
+		return condition
+	var met_now: Callable = condition
+	var timeout_ms: int = int(clampf(_float_param(params, "timeout_seconds", 5.0), 0.1, 60.0) * 1000.0)
+	var start: int = Time.get_ticks_msec()
+	var met: bool = met_now.call()
+	while not met and Time.get_ticks_msec() - start < timeout_ms:
+		await get_tree().process_frame
+		met = met_now.call()
+	return {"met": met, "waited_seconds": float(Time.get_ticks_msec() - start) / 1000.0}
+
+
+## A callable that reports whether the condition holds, or an error.
+func _wait_condition(params: Dictionary) -> Variant:
+	var path: String = str(params.get("node_path", ""))
+	var sig: String = str(params.get("signal", ""))
+	var prop: String = str(params.get("property", ""))
+	if sig.is_empty() and prop.is_empty():
+		return func() -> bool: return _resolve(path) is Node
+	var found: Variant = _resolve(path)
+	if found is Dictionary:
+		return found
+	var node: Node = found
+	if not sig.is_empty():
+		return _signal_condition(node, sig)
+	return _property_condition(node, prop, params.get("equals", null))
+
+
+func _signal_condition(node: Node, sig: String) -> Variant:
+	if not node.has_signal(sig):
+		return _fail("SIGNAL_NOT_FOUND", "%s has no signal \"%s\"" % [node.get_class(), sig])
+	var fired: Array[bool] = [false]
+	var on_fire: Callable = func() -> void: fired[0] = true
+	# shortcut: a signal that never fires keeps this one-shot connection until
+	# the node is freed; harmless, but a disconnect on timeout would be tidier.
+	var err: Error = node.connect(sig, on_fire.unbind(_signal_arg_count(node, sig)), CONNECT_ONE_SHOT)
+	if err != OK:
+		return _fail("SIGNAL_NOT_FOUND", "cannot connect to %s: %s" % [sig, error_string(err)])
+	return func() -> bool: return fired[0]
+
+
+func _signal_arg_count(node: Node, sig: String) -> int:
+	for info: Dictionary in node.get_signal_list():
+		if str(info["name"]) == sig:
+			var args: Array = info["args"]
+			return args.size()
+	return 0
+
+
+func _property_condition(node: Node, prop: String, equals: Variant) -> Variant:
+	if not _has_property(node, prop):
+		return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), prop])
+	var path: NodePath = NodePath(prop)
+	var target: Variant = _convert(equals, node.get_indexed(path))
+	if equals == null or target == null:
+		return _fail("INVALID_VALUE", "property needs equals, a value of the property's type")
+	return func() -> bool: return is_instance_valid(node) and _same_value(node.get_indexed(path), target)
+
+
+## Equality that tolerates float rounding.
+func _same_value(a: Variant, b: Variant) -> bool:
+	if a is float and b is float:
+		var fa: float = a
+		var fb: float = b
+		return is_equal_approx(fa, fb)
+	if a is Vector2 and b is Vector2:
+		var va: Vector2 = a
+		var vb: Vector2 = b
+		return va.is_equal_approx(vb)
+	return a == b
