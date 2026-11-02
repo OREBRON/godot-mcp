@@ -68,12 +68,15 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 |---|---|---|
 | `project_info` | no | Project, Godot version, editor connection and game status. Call it first. |
 | `script_check` | no | Parses `.gd` files with the real Godot, so autoloads and `class_name` globals resolve. Returns file, line and message for each failure. |
+| `test_run` | no | Runs the project's gdUnit4 or GUT tests headless; returns counts and each failing test, read from the JUnit report. |
 | `game_run` | no | Runs the project or one scene, optionally headless. Returns the first output and parsed errors. |
 | `game_output` | no | Reads more output using a cursor (`next_since`). `errors_only` returns just the errors. |
 | `game_stop` | no | Stops the game and every process it started. |
 | `game_scene_tree` | no | Live node tree of the running game, runtime nodes included. Absolute paths such as `/root/Game` reach autoloads. |
 | `game_node_get` | no | Live properties and script variables of a node in the running game. |
 | `game_node_set` | no | Sets live properties to set up a situation to test, all or none. Nothing is saved. |
+| `game_wait` | no | Waits until a node exists, a signal is emitted or a property reaches a value, with a timeout. |
+| `game_performance` | no | Frame rate over a sample, process and physics time, node and orphan counts, memory, draw calls. |
 | `game_input` | no | Sends an InputMap action, a key, a mouse click or a mouse move. Pressed and released by default; `pressed` sends one half to hold an input. |
 | `game_time` | no | Pauses, resumes, or steps exactly N physics frames and pauses again, for checks that come out the same every run. |
 | `game_screenshot` | no (windowed game) | PNG of the game's current frame, with the logical size `game_input` positions use. |
@@ -83,6 +86,9 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `node_add` | yes | Adds a node by class (built-in or `class_name`) or instances a `.tscn`, optionally setting properties. |
 | `node_set_properties` | yes | Sets several properties in one undoable action. Accepts JSON values or Godot's text form, `res://` paths for resources and scripts, and new resources inline: `{"type": "RectangleShape2D", "size": [16, 16]}`. |
 | `node_delete` | yes | Deletes a node and its children. Undoable. |
+| `node_move` | yes | Renames, reparents (keeping the global transform) or reorders a node, or toggles Editable Children on an instance. Undoable. |
+| `node_duplicate` | yes | Copies a node with its children next to it. Undoable. |
+| `resource_save` | yes | Writes a `.tres` of a built-in or `class_name` class with its properties, such as a material or an item's data. |
 | `node_signal_connect` | yes | Connects (or disconnects) a signal to a method, saved with the scene, as the Node dock does. Undoable. |
 | `project_settings_get` / `project_settings_set` | yes | Reads settings by prefix or name; changes existing ones and saves `project.godot`. Undoable. |
 | `input_action_set` | yes | Creates, replaces or removes an input action with keys (physical), mouse buttons and joypad buttons. Undoable. |
@@ -166,8 +172,6 @@ Two safety measures:
 
 ## Roadmap
 
-- Running GUT or gdUnit4 tests and returning their results.
-- Creating instances of `class_name` resources inline, as built-in resources can be now.
 - An editor dock with a **Configure** button that downloads the right binary and writes the client configuration.
 - Publishing on the Godot Asset Library, Homebrew, Scoop and winget.
 - Signed and notarized binaries for macOS and Windows.
