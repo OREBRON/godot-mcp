@@ -60,3 +60,24 @@ func _initialize() -> void:
 	}
 	_ = os.Remove(filepath.Join(proj, "list_warnings.gd"))
 }
+
+// The plugin's scripts must parse; a parse error only shows in the other
+// tests as a plugin that never starts.
+func TestPluginScriptsParse(t *testing.T) {
+	g := findGodot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	scripts, _ := filepath.Glob(filepath.Join("..", "addons", "godot_mcp", "*.gd"))
+	if len(scripts) == 0 {
+		t.Fatal("no plugin scripts found")
+	}
+	for _, path := range scripts {
+		res := "res://addons/godot_mcp/" + filepath.Base(path)
+		out, _ := g.Command(ctx, "--headless", "--path", "..", "--check-only", "--script", res).CombinedOutput()
+		for _, is := range godot.ParseIssues(strings.Split(string(out), "\n")) {
+			if is.Severity == "error" {
+				t.Errorf("%s: %s (%s)", res, is.Message, is.Where)
+			}
+		}
+	}
+}
