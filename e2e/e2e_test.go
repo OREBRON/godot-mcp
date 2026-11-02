@@ -171,8 +171,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 26 {
-		t.Errorf("got %d tools, want 26", len(tools.Tools))
+	if len(tools.Tools) != 28 {
+		t.Errorf("got %d tools, want 28", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
@@ -271,6 +271,29 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_add", map[string]any{"type": "Node2D", "name": "Temp", "parent_path": "Hero"})
 	ok("node_delete", map[string]any{"node_path": "Hero/Temp"})
 	fails("node_get", map[string]any{"node_path": "Hero/Temp"}, "NODE_NOT_FOUND")
+
+	// Copy, rename, reparent and reorder, and Editable Children.
+	if r := ok("node_duplicate", map[string]any{"node_path": "Hero"}); r["path"] != "Hero2" {
+		t.Errorf("node_duplicate Hero = %v", r)
+	}
+	if p := ok("node_get", map[string]any{"node_path": "Hero2", "properties": []any{"position"}})["properties"].(map[string]any); p["position"] != "Vector2(5, 6)" {
+		t.Errorf("the copy lost its position: %v", p)
+	}
+	if r := ok("node_move", map[string]any{"node_path": "Hero2", "new_name": "Clone", "new_parent": "Player", "index": 0}); r["path"] != "Player/Clone" {
+		t.Errorf("node_move into Player = %v", r)
+	}
+	if r := ok("node_move", map[string]any{"node_path": "Player/Clone", "new_parent": ".", "index": 0}); r["path"] != "Clone" {
+		t.Errorf("node_move back to the root = %v", r)
+	}
+	if first := ok("scene_tree", map[string]any{"max_depth": 1})["tree"].(map[string]any)["children"].([]any)[0].(map[string]any); first["name"] != "Clone" {
+		t.Errorf("index 0 did not put Clone first: %v", first)
+	}
+	fails("node_move", map[string]any{"node_path": ".", "new_parent": "Hero"}, "root cannot be moved")
+	fails("node_move", map[string]any{"node_path": "Hero", "new_parent": "Hero"}, "into itself")
+	fails("node_move", map[string]any{"node_path": "Hero"}, "INVALID_PARAMS")
+	fails("node_move", map[string]any{"node_path": "Hero", "editable_children": true}, "instanced scene")
+	ok("node_move", map[string]any{"node_path": "Player", "editable_children": true})
+	ok("node_set_properties", map[string]any{"node_path": "Player/Shape", "properties": map[string]any{"disabled": true}})
 
 	// Project settings and input actions, saved to project.godot.
 	if v := ok("project_settings_get", map[string]any{"prefix": "display/window/size/viewport_"})["settings"].(map[string]any); v["display/window/size/viewport_width"] != 1152.0 {

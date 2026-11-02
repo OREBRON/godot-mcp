@@ -28,6 +28,8 @@ func _init(plugin: EditorPlugin) -> void:
 		"node_set_properties": _node_set_properties,
 		"node_delete": _node_delete,
 		"node_signal_connect": _node_signal_connect,
+		"node_move": _node_move,
+		"node_duplicate": _node_duplicate,
 		"editor_screenshot": _editor_screenshot,
 	}
 	_project = ProjectCommands.new(plugin)
@@ -602,6 +604,131 @@ func _connections(from: Node, sig: String) -> Array:
 		if target is Node and _inside(target):
 			out.append({"to": _rel(target), "method": str(c.callable.get_method())})
 	return out
+
+
+## Renames, reparents or reorders a node, or toggles Editable Children on
+## an instanced scene, as one undoable action.
+func _node_move(p: Dictionary) -> Dictionary:
+	var node = _resolve(str(p.get("node_path", "")))
+	if _is_error(node):
+		return node
+	var problem = _check_move(node, p)
+	if problem != null:
+		return problem
+	var ur := _plugin.get_undo_redo()
+	ur.create_action("MCP: move %s" % node.name)
+	_add_rename(ur, node, str(p.get("new_name", "")))
+	_add_reparent(ur, node, p)
+	_add_editable(ur, node, p.get("editable_children"))
+	ur.commit_action()
+	return {"scene": _root().scene_file_path, "path": _rel(node), "name": str(node.name)}
+
+
+func _check_move(node: Node, p: Dictionary) -> Variant:
+	var new_name := str(p.get("new_name", ""))
+	var moving := p.has("new_parent") or p.has("index")
+	if new_name.is_empty() and not moving and not p.has("editable_children"):
+		return _fail("INVALID_PARAMS", "give new_name, new_parent, index or editable_children")
+	if not new_name.is_empty() and new_name.validate_node_name() != new_name:
+		return _fail("INVALID_PARAMS", "\"%s\" is not a valid node name" % new_name, "names cannot contain . : @ / \" %")
+	if p.has("editable_children") and (node == _root() or node.scene_file_path.is_empty()):
+		return _fail("INVALID_PARAMS", "editable_children only applies to an instanced scene")
+	if node == _root() and moving:
+		return _fail("INVALID_PARAMS", "the scene root cannot be moved")
+	if new_name.is_empty() and not moving:
+		return null
+	var foreign = _check_editable(node, true)
+	if foreign != null or not p.has("new_parent"):
+		return foreign
+	return _check_new_parent(node, str(p.new_parent))
+
+
+func _check_new_parent(node: Node, path: String) -> Variant:
+	var parent = _resolve(path)
+	if _is_error(parent):
+		return parent
+	if parent == node or node.is_ancestor_of(parent):
+		return _fail("INVALID_PARAMS", "a node cannot move into itself or its own children")
+	return _check_editable(parent, false)
+
+
+func _add_rename(ur: EditorUndoRedoManager, node: Node, new_name: String) -> void:
+	if new_name.is_empty():
+		return
+	ur.add_do_method(node, "set_name", new_name)
+	ur.add_undo_method(node, "set_name", node.name)
+
+
+## Moves under new_parent (keeping the global transform) and to index. The
+## owners in the branch are put back, since leaving the tree clears them.
+func _add_reparent(ur: EditorUndoRedoManager, node: Node, p: Dictionary) -> void:
+	if not (p.has("new_parent") or p.has("index")):
+		return
+	var old_parent := node.get_parent()
+	var new_parent: Node = _resolve(str(p.new_parent)) if p.has("new_parent") else old_parent
+	var owners := []
+	_collect_owners(node, owners)
+	if new_parent != old_parent:
+		ur.add_do_method(node, "reparent", new_parent, true)
+		ur.add_undo_method(node, "reparent", old_parent, true)
+		for pair in owners:
+			ur.add_do_method(pair[0], "set_owner", pair[1])
+			ur.add_undo_method(pair[0], "set_owner", pair[1])
+	if p.has("index"):
+		ur.add_do_method(new_parent, "move_child", node, int(p.index))
+	ur.add_undo_method(old_parent, "move_child", node, node.get_index())
+
+
+func _add_editable(ur: EditorUndoRedoManager, node: Node, editable: Variant) -> void:
+	if editable == null:
+		return
+	var root := _root()
+	ur.add_do_method(root, "set_editable_instance", node, bool(editable))
+	ur.add_undo_method(root, "set_editable_instance", node, root.is_editable_instance(node))
+
+
+## Copies a node and its children next to it, as one undoable action.
+func _node_duplicate(p: Dictionary) -> Dictionary:
+	var node = _resolve(str(p.get("node_path", "")))
+	if _is_error(node):
+		return node
+	if node == _root():
+		return _fail("INVALID_PARAMS", "the scene root cannot be duplicated")
+	var foreign = _check_editable(node, true)
+	if foreign != null:
+		return foreign
+	var copy: Node = node.duplicate()
+	var wanted := str(p.get("name", ""))
+	if not wanted.is_empty() and wanted.validate_node_name() != wanted:
+		copy.free()
+		return _fail("INVALID_PARAMS", "\"%s\" is not a valid node name" % wanted)
+	if not wanted.is_empty():
+		copy.name = wanted
+	_record_duplicate(node, copy)
+	return {"scene": _root().scene_file_path, "path": _rel(copy), "name": str(copy.name)}
+
+
+func _record_duplicate(node: Node, copy: Node) -> void:
+	var parent := node.get_parent()
+	var root := _root()
+	var ur := _plugin.get_undo_redo()
+	ur.create_action("MCP: duplicate %s" % node.name)
+	ur.add_do_method(parent, "add_child", copy, true)
+	ur.add_do_method(parent, "move_child", copy, node.get_index() + 1)
+	for n in _owned_counterparts(node, copy):
+		ur.add_do_method(n, "set_owner", root)
+	ur.add_do_reference(copy)
+	ur.add_undo_method(parent, "remove_child", copy)
+	ur.commit_action()
+
+
+## The nodes in copy whose original in node belongs to the edited scene;
+## the insides of instances keep their instance as owner.
+func _owned_counterparts(node: Node, copy: Node) -> Array:
+	var owners := []
+	_collect_owners(node, owners)
+	var root := _root()
+	return owners.filter(func(pair: Array) -> bool: return pair[1] == root).map(func(pair: Array) -> Node: return copy.get_node(node.get_path_to(pair[0])))
 
 
 func _editor_screenshot(p: Dictionary) -> Dictionary:

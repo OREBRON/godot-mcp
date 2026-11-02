@@ -76,6 +76,19 @@ type inputActionSetIn struct {
 	Remove        bool     `json:"remove,omitempty" jsonschema:"delete the action instead"`
 }
 
+type nodeMoveIn struct {
+	NodePath         string `json:"node_path" jsonschema:"node to change, relative to the scene root"`
+	NewName          string `json:"new_name,omitempty" jsonschema:"rename it; Godot appends a number if a sibling has the name"`
+	NewParent        string `json:"new_parent,omitempty" jsonschema:"move it under this node, relative to the scene root; its global position is kept"`
+	Index            *int   `json:"index,omitempty" jsonschema:"its position among its siblings, 0 first"`
+	EditableChildren *bool  `json:"editable_children,omitempty" jsonschema:"on an instanced scene: let its inner nodes be changed here, like the editor's Editable Children"`
+}
+
+type nodeDuplicateIn struct {
+	NodePath string `json:"node_path" jsonschema:"node to copy with its children, relative to the scene root"`
+	Name     string `json:"name,omitempty" jsonschema:"name of the copy (default: Godot numbers it, e.g. Enemy2)"`
+}
+
 type screenshotIn struct {
 	Viewport string `json:"viewport,omitempty" jsonschema:"\"2d\", \"3d\" or \"auto\" (default: 3d when the scene root is a Node3D, else 2d)"`
 	MaxWidth int    `json:"max_width,omitempty" jsonschema:"scale the image down to at most this many pixels wide (default 1280)"`
@@ -131,6 +144,17 @@ func (s *Server) addNodeTools() {
 		Description: "Delete a node and its children from the edited scene. The user can undo it with Ctrl+Z until the scene is closed.",
 		Annotations: destructive,
 	}, "node_delete", 15*time.Second)
+	addEditorTool[nodeMoveIn](s, &mcp.Tool{
+		Name: "node_move",
+		Description: "Rename, reparent or reorder a node in the edited scene, or turn Editable Children on or off for an instanced scene, as one action the user can undo with Ctrl+Z. " +
+			"Properties and children move with it, unlike deleting and adding it again.",
+		Annotations: harmless,
+	}, "node_move", 15*time.Second)
+	addEditorTool[nodeDuplicateIn](s, &mcp.Tool{
+		Name:        "node_duplicate",
+		Description: "Copy a node with its children and properties next to the original in the edited scene, as one action the user can undo with Ctrl+Z.",
+		Annotations: editorEdit,
+	}, "node_duplicate", 15*time.Second)
 	addEditorTool[nodeSignalIn](s, &mcp.Tool{
 		Name: "node_signal_connect",
 		Description: "Connect a signal of one node in the edited scene to a method of another, or disconnect it, as the editor's Node dock does. " +
