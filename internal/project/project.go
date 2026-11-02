@@ -61,34 +61,35 @@ func Load(dir string) (*Project, error) {
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, ";") {
-			continue
-		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = line[1 : len(line)-1]
-			continue
-		}
-		key, raw, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val := unquote(strings.TrimSpace(raw))
-		switch {
-		case section == "application" && key == "config/name":
-			p.Name = val
-		case section == "application" && key == "run/main_scene":
-			p.MainScene = val
-		case section == "application" && key == "config/use_hidden_project_data_directory":
-			p.hiddenData = val != "false"
-		case section == "autoload":
-			p.Autoloads[key] = strings.TrimPrefix(val, "*")
+		} else if key, raw, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(line, ";") {
+			p.apply(section, strings.TrimSpace(key), unquote(strings.TrimSpace(raw)))
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
 	return p, nil
+}
+
+// apply records the project.godot settings the server uses.
+func (p *Project) apply(section, key, val string) {
+	if section == "autoload" {
+		p.Autoloads[key] = strings.TrimPrefix(val, "*")
+		return
+	}
+	if section != "application" {
+		return
+	}
+	switch key {
+	case "config/name":
+		p.Name = val
+	case "run/main_scene":
+		p.MainScene = val
+	case "config/use_hidden_project_data_directory":
+		p.hiddenData = val != "false"
+	}
 }
 
 func unquote(v string) string {
@@ -222,27 +223,14 @@ func (p *Project) checkCase(res string, mustExist bool) error {
 		if part == "" {
 			continue
 		}
-		entries, err := os.ReadDir(cur)
-		if errors.Is(err, os.ErrNotExist) && !mustExist {
-			return nil
-		}
-		if err != nil {
+		found, err := spelling(cur, part)
+		if err != nil && (mustExist || !errors.Is(err, os.ErrNotExist)) {
 			return err
 		}
-		found := ""
-		for _, e := range entries {
-			if e.Name() == part {
-				found = part
-				break
-			}
-			if found == "" && strings.EqualFold(e.Name(), part) {
-				found = e.Name()
-			}
+		if found == "" && !mustExist {
+			return nil // the rest does not exist yet
 		}
 		if found == "" {
-			if !mustExist {
-				return nil
-			}
 			return fmt.Errorf("%s does not exist", r)
 		}
 		if found != part {
@@ -251,4 +239,23 @@ func (p *Project) checkCase(res string, mustExist bool) error {
 		cur = filepath.Join(cur, found)
 	}
 	return nil
+}
+
+// spelling returns how name is spelled in dir: name itself, an entry that
+// differs only in letter case, or "" when there is none.
+func spelling(dir, name string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	found := ""
+	for _, e := range entries {
+		if e.Name() == name {
+			return name, nil
+		}
+		if found == "" && strings.EqualFold(e.Name(), name) {
+			found = e.Name()
+		}
+	}
+	return found, nil
 }
