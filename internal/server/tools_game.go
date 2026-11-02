@@ -188,6 +188,11 @@ func (s *Server) addLiveGameTools() {
 			"All values are checked first, so a bad one changes nothing. The change lives only in the running game; nothing is saved.",
 		Annotations: harmless,
 	}, "node_set", 15*time.Second)
+}
+
+// addGameControlTools registers the tools that act on the running game's
+// time and input, and measure or capture it.
+func (s *Server) addGameControlTools() {
 	addGameTool[gameTimeIn](s, &mcp.Tool{
 		Name: "game_time",
 		Description: "Pause, resume or step the game started by game_run. step runs exactly the given number of physics frames and pauses again, " +

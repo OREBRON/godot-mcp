@@ -27,6 +27,7 @@ func (s *Server) registerTools() {
 	s.addProjectTools()
 	s.addGameTools()
 	s.addLiveGameTools()
+	s.addGameControlTools()
 	s.addSceneTools()
 	s.addNodeTools()
 	s.addSettingsTools()
