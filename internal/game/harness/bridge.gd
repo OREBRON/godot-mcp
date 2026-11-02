@@ -229,34 +229,47 @@ func _node_get(params: Dictionary) -> Dictionary:
 	if found is Dictionary:
 		return found
 	var node: Node = found
-	var out: Dictionary = {}
 	var wanted: Array = []
 	var raw: Variant = params.get("properties", [])
 	if raw is Array:
 		wanted = raw
-	if wanted.is_empty():
-		# Stored properties and script variables that differ from their
-		# defaults: the node's live state without the noise.
-		var script: Script = node.get_script()
-		for info: Dictionary in node.get_property_list():
-			var usage: int = info["usage"]
-			if usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
-				continue
-			var prop: String = info["name"]
-			var value: Variant = node.get(prop)
-			var default: Variant = ClassDB.class_get_property_default_value(node.get_class(), prop)
-			if script != null and default == null:
-				default = script.get_property_default_value(prop)
-			if typeof(value) == typeof(default) and value == default:
-				continue
-			out[prop] = _encode(value)
-	else:
-		for key: Variant in wanted:
-			var prop: String = str(key)
-			if not (StringName(prop.get_slice(":", 0)) in node):
-				return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), prop], "call game_node_get without properties to see what it has")
-			out[prop] = _encode(node.get_indexed(NodePath(prop)))
+	var out: Dictionary = _changed_properties(node) if wanted.is_empty() else _listed_properties(node, wanted)
+	if out.has("__error"):
+		return out
 	return {"path": _rel(node), "type": node.get_class(), "properties": out}
+
+
+## Stored properties and script variables that differ from their defaults:
+## the node's live state without the noise.
+func _changed_properties(node: Node) -> Dictionary:
+	var out: Dictionary = {}
+	var script: Script = node.get_script()
+	for info: Dictionary in node.get_property_list():
+		var usage: int = info["usage"]
+		if usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
+			continue
+		var prop: String = info["name"]
+		var value: Variant = node.get(prop)
+		var default: Variant = ClassDB.class_get_property_default_value(node.get_class(), prop)
+		if script != null and default == null:
+			default = script.get_property_default_value(prop)
+		if typeof(value) != typeof(default) or value != default:
+			out[prop] = _encode(value)
+	return out
+
+
+func _listed_properties(node: Node, wanted: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for key: Variant in wanted:
+		var prop: String = str(key)
+		if not _has_property(node, prop):
+			return _fail("PROPERTY_NOT_FOUND", "%s has no property \"%s\"" % [node.get_class(), prop], "call game_node_get without properties to see what it has")
+		out[prop] = _encode(node.get_indexed(NodePath(prop)))
+	return out
+
+
+func _has_property(node: Node, prop: String) -> bool:
+	return StringName(prop.get_slice(":", 0)) in node
 
 
 ## Turns a value into JSON: plain values as they are, saved resources as
@@ -347,72 +360,92 @@ const MOUSE_BUTTONS: Dictionary = {
 ## input is pressed, held for duration seconds and released; "pressed" sends
 ## only one half, to hold an input across calls.
 func _input_cmd(params: Dictionary) -> Variant:
+	var at: Variant = _vec2(params.get("position", null))
+	var built: Variant = _build_event(params, at)
+	if built is Dictionary:
+		return built # an error
+	if at != null:
+		var pos: Vector2 = at
+		_move_mouse(pos)
+	if built == null:
+		return {"sent": "mouse move to %s" % at}
+	var event: InputEvent = built
+	return await _press(event, params)
+
+
+## The pressed event the params describe, null for a mouse move alone, or
+## an error.
+func _build_event(params: Dictionary, at: Variant) -> Variant:
 	var action: String = str(params.get("action", ""))
 	var key: String = str(params.get("key", ""))
 	var button: String = str(params.get("mouse_button", ""))
-	var at: Variant = _vec2(params.get("position", null))
 	var kinds: int = int(not action.is_empty()) + int(not key.is_empty()) + int(not button.is_empty())
 	if kinds > 1 or (kinds == 0 and at == null):
 		return _fail("INVALID_PARAMS", "give exactly one of action, key or mouse_button (with position), or position alone to move the mouse")
-
-	var events: Array[InputEvent] = [] # the pressed event; the release is derived from it
-	var described: String = ""
 	if not action.is_empty():
-		if not InputMap.has_action(StringName(action)):
-			var custom: Array[String] = []
-			for a: StringName in InputMap.get_actions():
-				if not str(a).begins_with("ui_"):
-					custom.append(str(a))
-			return _fail("INVALID_PARAMS", "the project has no input action \"%s\"" % action, "its actions: %s, plus the built-in ui_* actions" % (", ".join(PackedStringArray(custom)) if not custom.is_empty() else "(none of its own)"))
-		var ev: InputEventAction = InputEventAction.new()
-		ev.action = StringName(action)
-		ev.strength = 1.0
-		events.append(ev)
-		described = "action %s" % action
-	elif not key.is_empty():
+		return _action_event(action)
+	if not key.is_empty():
 		var ev: InputEventKey = _key_event(key)
 		if ev == null:
 			return _fail("INVALID_PARAMS", "unknown key \"%s\"" % key, "use Godot key names such as Space, Enter, Escape, Left, A, F1, optionally with modifiers: Ctrl+S, Shift+Tab")
-		events.append(ev)
-		described = "key %s" % key
-	elif not button.is_empty():
-		if not MOUSE_BUTTONS.has(button):
-			return _fail("INVALID_PARAMS", "unknown mouse_button \"%s\"" % button, "use left, right, middle, wheel_up or wheel_down")
-		if at == null:
-			return _fail("INVALID_PARAMS", "mouse_button needs position, as [x, y] in the game's viewport coordinates")
-		var ev: InputEventMouseButton = InputEventMouseButton.new()
-		var index: MouseButton = MOUSE_BUTTONS[button]
-		ev.button_index = index
-		ev.position = at
-		ev.global_position = at
-		events.append(ev)
-		described = "mouse %s at %s" % [button, at]
+		return ev
+	if not button.is_empty():
+		return _mouse_event(button, at)
+	return null
 
-	# Mouse input goes to the viewport directly, which reaches Controls that
-	# stop the mouse; Input.parse_input_event would not.
-	if at != null:
-		var motion: InputEventMouseMotion = InputEventMouseMotion.new()
-		motion.position = at
-		motion.global_position = at
-		get_viewport().push_input(motion, true)
-		if described.is_empty():
-			described = "mouse move to %s" % at
-	if events.is_empty():
-		return {"sent": described}
 
+func _action_event(action: String) -> Variant:
+	if not InputMap.has_action(StringName(action)):
+		var custom: Array[String] = []
+		for a: StringName in InputMap.get_actions():
+			if not str(a).begins_with("ui_"):
+				custom.append(str(a))
+		var listed: String = ", ".join(PackedStringArray(custom)) if not custom.is_empty() else "(none of its own)"
+		return _fail("INVALID_PARAMS", "the project has no input action \"%s\"" % action, "its actions: %s, plus the built-in ui_* actions" % listed)
+	var ev: InputEventAction = InputEventAction.new()
+	ev.action = StringName(action)
+	ev.strength = 1.0
+	return ev
+
+
+func _mouse_event(button: String, at: Variant) -> Variant:
+	if not MOUSE_BUTTONS.has(button):
+		return _fail("INVALID_PARAMS", "unknown mouse_button \"%s\"" % button, "use left, right, middle, wheel_up or wheel_down")
+	if at == null:
+		return _fail("INVALID_PARAMS", "mouse_button needs position, as [x, y] in the game's viewport coordinates")
+	var ev: InputEventMouseButton = InputEventMouseButton.new()
+	var index: MouseButton = MOUSE_BUTTONS[button]
+	ev.button_index = index
+	ev.position = at
+	ev.global_position = at
+	return ev
+
+
+## Mouse input goes to the viewport directly, which reaches Controls that
+## stop the mouse; Input.parse_input_event would not.
+func _move_mouse(at: Vector2) -> void:
+	var motion: InputEventMouseMotion = InputEventMouseMotion.new()
+	motion.position = at
+	motion.global_position = at
+	get_viewport().push_input(motion, true)
+
+
+## Presses and releases event, or sends one half when "pressed" is given.
+func _press(event: InputEvent, params: Dictionary) -> Dictionary:
+	var described: String = event.as_text()
 	var pressed_raw: Variant = params.get("pressed", null)
 	if pressed_raw is bool:
 		var only: bool = pressed_raw
-		_dispatch(events[0], only)
+		_dispatch(event, only)
 		return {"sent": "%s %s" % [described, "pressed" if only else "released"]}
-	_dispatch(events[0], true)
+	_dispatch(event, true)
 	var hold: float = _float_param(params, "duration", 0.1)
 	if hold > 0.0:
 		# Real seconds, also while paused and whatever the time scale.
 		await get_tree().create_timer(hold, true, false, true).timeout
 	else:
 		await get_tree().process_frame
-	_dispatch(events[0], false)
+	_dispatch(event, false)
 	return {"sent": "%s pressed and released" % described, "held_seconds": hold}
 
 
