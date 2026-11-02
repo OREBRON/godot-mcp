@@ -15,6 +15,12 @@ import (
 
 type projectInfoIn struct{}
 
+type testRunIn struct {
+	Dirs           []string `json:"dirs,omitempty" jsonschema:"res:// folders of tests (default res://test or res://tests)"`
+	Framework      string   `json:"framework,omitempty" jsonschema:"\"auto\" (default: gdUnit4 if installed, else GUT), \"gdunit4\" or \"gut\""`
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty" jsonschema:"stop the run after this many seconds (default 300)"`
+}
+
 type scriptCheckIn struct {
 	Paths         []string `json:"paths,omitempty" jsonschema:"res:// or project-relative paths of .gd files to check. Leave empty to check every script outside addons/."`
 	IncludeAddons bool     `json:"include_addons,omitempty" jsonschema:"also check scripts under addons/ when paths is empty"`
@@ -28,6 +34,12 @@ func (s *Server) addProjectTools() {
 			"and whether a game started by game_run is running.",
 		Annotations: readOnly,
 	}, s.projectInfo)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "test_run",
+		Description: "Run the project's gdUnit4 or GUT tests headless and return the counts and each failing test with its message, read from the framework's JUnit report, " +
+			"plus any script errors printed during the run. Needs gdUnit4 (addons/gdUnit4) or GUT (addons/gut) installed. A run that hangs is stopped after timeout_seconds.",
+		Annotations: readOnly,
+	}, s.testRun)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "script_check",
 		Description: "Parse-check GDScript files with the project's own Godot, so types, autoloads and class_name globals resolve exactly as in the game. " +
@@ -151,4 +163,52 @@ func checkSummary(res godot.CheckResult, notes []string) map[string]any {
 		"ok": res.OK, "checked": res.Checked, "failed": res.Failed,
 		"failures": failures, "other_errors": res.Other, "notes": append(notes, res.Notes...),
 	}
+}
+
+func (s *Server) testRun(ctx context.Context, _ *mcp.CallToolRequest, in testRunIn) (*mcp.CallToolResult, any, error) {
+	p, err := s.project()
+	if err != nil {
+		return nil, nil, err
+	}
+	e, _, err := s.godotExec(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	framework, err := godot.DetectFramework(p, in.Framework)
+	if err != nil {
+		return nil, nil, err
+	}
+	dirs, err := testDirs(p, in.Dirs)
+	if err != nil {
+		return nil, nil, err
+	}
+	timeout := 300 * time.Second
+	if in.TimeoutSeconds != nil {
+		timeout = time.Duration(max(*in.TimeoutSeconds, 1) * float64(time.Second))
+	}
+	res, err := e.RunTests(ctx, p, framework, dirs, timeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	r, err := jsonResult(res)
+	return r, nil, err
+}
+
+// testDirs is the given folders as checked res:// paths, or the default.
+func testDirs(p *project.Project, dirs []string) ([]string, error) {
+	if len(dirs) == 0 {
+		return godot.DefaultTestDirs(p)
+	}
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		res, err := p.ToRes(d)
+		if err == nil {
+			err = p.CheckCase(res)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
+	return out, nil
 }
