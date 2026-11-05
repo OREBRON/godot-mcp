@@ -349,6 +349,8 @@ func (s *Server) exportBuild(ctx context.Context, _ *mcp.CallToolRequest, in exp
 	if err != nil {
 		return nil, nil, err
 	}
+	s.exportMu.Lock()
+	defer s.exportMu.Unlock()
 	before, start := godot.OutputStat(out), time.Now()
 	run, err := e.Export(ctx, p, preset.Name, out, in.Debug, seconds(in.TimeoutSeconds, 600*time.Second))
 	if err != nil {

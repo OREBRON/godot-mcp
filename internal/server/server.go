@@ -47,6 +47,12 @@ type Server struct {
 	opts   Options
 	runner *game.Runner
 
+	// exportMu runs one export at a time: Godot's exporters share a
+	// temporary pack file, so two at once can corrupt each other.
+	// shortcut: exports from other godot-mcp processes are not held off;
+	// lock a file in Godot's data folder if parallel sessions export.
+	exportMu sync.Mutex
+
 	mu      sync.Mutex
 	proj    *project.Project
 	bridge  *bridge.Client
