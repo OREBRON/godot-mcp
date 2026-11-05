@@ -320,9 +320,9 @@ static func to_res_path(value: String) -> String:
 	return value.replace("\\", "/").simplify_path()
 
 
-## Returns why a res:// path may not be used, or "" when it is fine. The
-## server checks the paths it can see; these come inside property values.
-## ".." can leave the project, and macOS and Windows accept a wrongly cased
+## Returns why a res:// path may not be used, or "" when it is fine. Every
+## path the plugin writes or loads goes through here: the server checks paths
+## too, but anyone holding the bridge token can skip it. ".." can leave the project, and macOS and Windows accept a wrongly cased
 ## path that then breaks on Linux and in exported games.
 static func check_res_path(path: String) -> String:
 	if not path.begins_with("res://"):

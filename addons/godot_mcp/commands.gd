@@ -337,7 +337,10 @@ func _listed_properties(node: Node, wanted: Array) -> Dictionary:
 
 
 func _scene_open(p: Dictionary) -> Dictionary:
-	var path := str(p.get("path", ""))
+	var path := Codec.to_res_path(str(p.get("path", "")))
+	var bad := Codec.check_res_path(path)
+	if not bad.is_empty():
+		return _fail("INVALID_PATH", bad)
 	if not (path.ends_with(".tscn") or path.ends_with(".scn")):
 		return _fail("INVALID_PARAMS", "%s is not a scene file (.tscn or .scn)" % path)
 	if not FileAccess.file_exists(path):
@@ -351,7 +354,10 @@ func _scene_open(p: Dictionary) -> Dictionary:
 
 
 func _scene_create(p: Dictionary) -> Dictionary:
-	var path := str(p.get("path", ""))
+	var path := Codec.to_res_path(str(p.get("path", "")))
+	var bad := Codec.check_res_path(path)
+	if not bad.is_empty():
+		return _fail("INVALID_PATH", bad)
 	if not path.ends_with(".tscn"):
 		return _fail("INVALID_PARAMS", "path must end with .tscn, got \"%s\"" % path)
 	if FileAccess.file_exists(path):
@@ -388,9 +394,13 @@ func _scene_save(p: Dictionary) -> Dictionary:
 		if root.scene_file_path.is_empty():
 			return _fail("NO_PATH", "the scene has never been saved", "pass path, e.g. \"res://scenes/level.tscn\"")
 		target = root.scene_file_path
-	elif not target.ends_with(".tscn") and not target.ends_with(".scn"):
-		return _fail("INVALID_PARAMS", "path must end with .tscn or .scn")
 	else:
+		target = Codec.to_res_path(target)
+		var bad := Codec.check_res_path(target)
+		if not bad.is_empty():
+			return _fail("INVALID_PATH", bad)
+		if not target.ends_with(".tscn") and not target.ends_with(".scn"):
+			return _fail("INVALID_PARAMS", "path must end with .tscn or .scn")
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(target.get_base_dir()))
 	# Neither save call reports a failed write (save_scene() returns OK
 	# regardless), so check that the file can be written before saving and
@@ -479,6 +489,10 @@ func _new_node(p: Dictionary) -> Variant:
 
 
 func _instance(scene_path: String) -> Variant:
+	scene_path = Codec.to_res_path(scene_path)
+	var bad := Codec.check_res_path(scene_path)
+	if not bad.is_empty():
+		return _fail("INVALID_PATH", bad)
 	if scene_path == _root().scene_file_path:
 		return _fail("INVALID_PARAMS", "a scene cannot contain an instance of itself")
 	if not ResourceLoader.exists(scene_path):

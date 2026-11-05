@@ -199,7 +199,10 @@ func _key_event(spec: String) -> InputEventKey:
 ## Writes a new .tres of a built-in class or a class_name class. Writing a
 ## file is not undoable.
 func _resource_save(p: Dictionary) -> Dictionary:
-	var path := str(p.get("path", ""))
+	var path := Codec.to_res_path(str(p.get("path", "")))
+	var bad := Codec.check_res_path(path)
+	if not bad.is_empty():
+		return _fail("INVALID_PATH", bad)
 	if not (path.ends_with(".tres") or path.ends_with(".res")):
 		return _fail("INVALID_PARAMS", "path must end with .tres or .res, got \"%s\"" % path)
 	if FileAccess.file_exists(path) and not bool(p.get("overwrite", false)):
