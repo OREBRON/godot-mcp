@@ -41,6 +41,7 @@ type session struct {
 	proj      string
 	editorLog string
 	bin       string
+	godot     godot.Exec
 	godotPath string
 }
 
@@ -64,24 +65,12 @@ func findGodot(t *testing.T) godot.Exec {
 
 func start(t *testing.T, headless bool) *session {
 	t.Helper()
-	g := findGodot(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	t.Cleanup(cancel)
-
-	repo, _ := filepath.Abs("..")
-	proj := t.TempDir()
-	for _, p := range []string{"project.godot", "addons", "demo"} {
-		copyTree(t, filepath.Join(repo, p), filepath.Join(proj, p))
-	}
-	if out, err := g.Command(ctx, "--headless", "--path", proj, "--import").CombinedOutput(); err != nil {
-		t.Fatalf("import: %v\n%s", err, out)
-	}
-
-	args := []string{"-e", "--path", proj}
+	s := newSession(t)
+	args := []string{"-e", "--path", s.proj}
 	if headless {
 		args = append([]string{"--headless"}, args...)
 	}
-	editor := g.Command(ctx, args...)
+	editor := s.godot.Command(s.ctx, args...)
 	editorLog, _ := os.Create(filepath.Join(t.TempDir(), "editor.log"))
 	editor.Stdout, editor.Stderr = editorLog, editorLog
 	if err := editor.Start(); err != nil {
@@ -95,8 +84,28 @@ func start(t *testing.T, headless bool) *session {
 			t.Logf("editor log:\n%s", b)
 		}
 	})
-	waitFor(t, filepath.Join(proj, ".godot", "godot_mcp", "bridge.json"), time.Minute)
+	waitFor(t, filepath.Join(s.proj, ".godot", "godot_mcp", "bridge.json"), time.Minute)
+	s.editorLog = editorLog.Name()
+	s.cs, s.server = s.connect()
+	return s
+}
 
+// newSession copies the demo project, imports it and builds the binary,
+// without starting an editor or a server.
+func newSession(t *testing.T) *session {
+	t.Helper()
+	g := findGodot(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	t.Cleanup(cancel)
+
+	repo, _ := filepath.Abs("..")
+	proj := t.TempDir()
+	for _, p := range []string{"project.godot", "addons", "demo"} {
+		copyTree(t, filepath.Join(repo, p), filepath.Join(proj, p))
+	}
+	if out, err := g.Command(ctx, "--headless", "--path", proj, "--import").CombinedOutput(); err != nil {
+		t.Fatalf("import: %v\n%s", err, out)
+	}
 	bin := filepath.Join(t.TempDir(), "godot-mcp")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
@@ -104,9 +113,7 @@ func start(t *testing.T, headless bool) *session {
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/godot-mcp").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	s := &session{t: t, ctx: ctx, proj: proj, editorLog: editorLog.Name(), bin: bin, godotPath: g.Path}
-	s.cs, s.server = s.connect()
-	return s
+	return &session{t: t, ctx: ctx, proj: proj, bin: bin, godot: g, godotPath: g.Path}
 }
 
 // connect starts another godot-mcp server on the same project, as a second
