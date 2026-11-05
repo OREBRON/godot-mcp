@@ -65,6 +65,7 @@ func (e *MissingError) Error() string { return e.Target + " does not exist" }
 // files are the project's files as Godot's file system sees them.
 type files struct {
 	text   []string          // res:// paths of files that can hold references
+	known  map[string]bool   // the same, for checking paths read from files
 	all    []string          // every resource file, for suggestions
 	uids   map[string]string // uid:// -> res://
 	binary int               // .scn and .res files, which cannot be scanned
@@ -75,7 +76,7 @@ var textExts = []string{".tscn", ".tres", ".gd", ".gdshader", ".gdshaderinc"}
 // walk lists the project's files, skipping the data folder, hidden folders
 // and folders holding .gdignore, as Godot does.
 func (p *Project) walk() (*files, error) {
-	f := &files{uids: map[string]string{}}
+	f := &files{uids: map[string]string{}, known: map[string]bool{}}
 	err := filepath.WalkDir(p.Dir, func(osPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // unreadable folders are skipped, not fatal
@@ -83,7 +84,8 @@ func (p *Project) walk() (*files, error) {
 		if d.IsDir() && osPath != p.Dir && (osPath == p.DataDir() || strings.HasPrefix(d.Name(), ".") || exists(filepath.Join(osPath, ".gdignore"))) {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() {
+		// A link may lead out of the project; Godot's own scan skips it too.
+		if d.Type().IsRegular() {
 			f.add(p, osPath)
 		}
 		return nil
@@ -110,6 +112,7 @@ func (f *files) add(p *Project, osPath string) {
 		f.binary++
 	case res == "res://project.godot" || slices.Contains(textExts, ext):
 		f.text = append(f.text, res)
+		f.known[res] = true
 		if ext == ".tscn" || ext == ".tres" {
 			f.addUID(headerUID(osPath), res)
 		}
@@ -401,7 +404,7 @@ func (p *Project) FindNodes(class string) (*Nodes, error) {
 		return nil, err
 	}
 	out := &Nodes{NodeType: class, Scripts: f.classScripts(p, class), Nodes: []NodeHit{}, Notes: f.notes()}
-	sc := &scenes{p: p, parsed: map[string][]sceneNode{}}
+	sc := &scenes{p: p, f: f, parsed: map[string][]sceneNode{}}
 	for _, file := range f.text {
 		if hasExt(file, ".tscn") {
 			out.Nodes = append(out.Nodes, sc.matches(file, class, out.Scripts)...)
@@ -437,6 +440,7 @@ type sceneNode struct {
 // scenes parses each .tscn file once, for following instances.
 type scenes struct {
 	p      *Project
+	f      *files
 	parsed map[string][]sceneNode
 }
 
@@ -444,7 +448,10 @@ func (s *scenes) nodes(res string) []sceneNode {
 	if n, ok := s.parsed[res]; ok {
 		return n
 	}
-	b, _ := os.ReadFile(s.p.osPath(res))
+	var b []byte
+	if s.f.known[res] { // an instance path read from a scene may lead anywhere
+		b, _ = os.ReadFile(s.p.osPath(res))
+	}
 	s.parsed[res] = parseScene(b)
 	return s.parsed[res]
 }

@@ -176,6 +176,31 @@ func TestFindNodes(t *testing.T) {
 	}
 }
 
+// TestFindStaysInProject checks that links and scene paths cannot make
+// project_find read files outside the project.
+func TestFindStaysInProject(t *testing.T) {
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "secret.gd"), []byte("var key = \"res://scenes/player.tscn\"\n"), 0o644)
+	p := findProject(t, map[string]string{
+		"project.godot":      "",
+		"scenes/player.tscn": "[gd_scene format=3]\n\n[node name=\"Player\" type=\"Node\"]\n",
+		"scenes/main.tscn":   "[gd_scene format=3]\n\n[ext_resource type=\"PackedScene\" path=\"res://../out.tscn\" id=\"1\"]\n\n[node name=\"Main\" type=\"Node\"]\n\n[node name=\"O\" parent=\".\" instance=ExtResource(\"1\")]\n",
+	})
+	// res://../out.tscn names the folder above the project.
+	os.WriteFile(filepath.Join(filepath.Dir(p.Dir), "out.tscn"), []byte("[gd_scene format=3]\n\n[node name=\"Out\" type=\"Timer\"]\n"), 0o644)
+	if err := os.Symlink(filepath.Join(outside, "secret.gd"), filepath.Join(p.Dir, "leak.gd")); err != nil {
+		t.Skip("cannot make links here:", err)
+	}
+	os.Symlink(outside, filepath.Join(p.Dir, "linked"))
+	refs, err := p.FindRefs("res://scenes/player.tscn")
+	if err != nil || len(refs.References) != 0 {
+		t.Errorf("FindRefs read through a link: %v, %v", refLines(refs.References), err)
+	}
+	if nodes, err := p.FindNodes("Timer"); err != nil || len(nodes.Nodes) != 0 {
+		t.Errorf("FindNodes followed a path out of the project: %+v, %v", nodes, err)
+	}
+}
+
 func TestFindNodesCap(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node\"]\n")
