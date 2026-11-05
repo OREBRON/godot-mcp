@@ -51,6 +51,12 @@ func TestClassInfo(t *testing.T) {
 	write(t, filepath.Join(s.proj, "scripts", "helper.gd"), "class_name Helper\nextends RefCounted\n\nstatic func hi(times := 1) -> int:\n\treturn times\n")
 	check(map[string]any{"class": "Helper"}, []string{`"static hi(times: int = 1) -> int"`, "godot --import"}, nil)
 
+	// Constants and enums of a base script come with include_inherited.
+	write(t, filepath.Join(s.proj, "scripts", "base_unit.gd"), "class_name BaseUnit\nextends RefCounted\n\nconst SPEED = 10\nenum State { IDLE, RUN }\n")
+	write(t, filepath.Join(s.proj, "scripts", "child_unit.gd"), "class_name ChildUnit\nextends BaseUnit\n\nconst OWN = 1\n")
+	check(map[string]any{"class": "ChildUnit"}, []string{`"OWN"`}, []string{`"SPEED"`, `"State"`})
+	check(map[string]any{"class": "ChildUnit", "include_inherited": true}, []string{`"OWN"`, `"SPEED"`, `"State"`}, nil)
+
 	s.fails("class_info", map[string]any{"class": "CharacterBody2d"}, "CLASS_NOT_FOUND")
 	s.fails("class_info", map[string]any{"class": "CharacterBody2d"}, "did you mean: CharacterBody2D")
 	write(t, filepath.Join(s.proj, "scripts", "broken.gd"), "class_name Broken\nextends Node\n\nvar x: int = \"text\"\n")

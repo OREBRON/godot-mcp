@@ -104,7 +104,8 @@ func _describe_script(name: String, script: Script, inherited: bool) -> Dictiona
 		"methods": _methods(_minus(script.get_script_method_list(), drop.get_script_method_list() if drop else [])),
 		"signals": _signals(_minus(script.get_script_signal_list(), drop.get_script_signal_list() if drop else [])),
 	}
-	out.merge(_script_constants(script.get_script_constant_map(), drop.get_script_constant_map() if drop else {}))
+	var constants: Dictionary = _chain_constants(script) if inherited else script.get_script_constant_map()
+	out.merge(_script_constants(constants, drop.get_script_constant_map() if drop else {}))
 	if inherited:
 		_append(out, _describe_native(script.get_instance_base_type(), true))
 	return out
@@ -119,6 +120,16 @@ func _append(out: Dictionary, native: Dictionary) -> void:
 		var map: Dictionary = out[key]
 		var more: Dictionary = native[key]
 		map.merge(more)
+
+
+## The constants of script and its base scripts, which a script's own
+## constant map leaves out; the script's own win over its bases'.
+func _chain_constants(script: Script) -> Dictionary:
+	var all: Dictionary = {}
+	while script != null:
+		all.merge(script.get_script_constant_map())
+		script = script.get_base_script()
+	return all
 
 
 ## Splits a script's constants into enums (GDScript keeps them as
