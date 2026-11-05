@@ -1,8 +1,10 @@
 package project
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -43,6 +45,35 @@ Audio="res://autoload/audio.gd"
 	}
 	if p.DataDir() != filepath.Join(p.Dir, "godot") {
 		t.Errorf("data dir %s, want the non-hidden one", p.DataDir())
+	}
+}
+
+func TestExportPresets(t *testing.T) {
+	p := newProject(t, "config_version=5\n")
+	if _, err := p.ExportPresets(); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("no export_presets.cfg: err = %v, want ErrNotExist", err)
+	}
+	os.WriteFile(filepath.Join(p.Dir, "export_presets.cfg"), []byte(`[preset.0]
+
+name="Linux"
+platform="Linux"
+export_path="build/game.x86_64"
+
+[preset.0.options]
+
+name="not a preset"
+binary_format/architecture="x86_64"
+
+[preset.1]
+
+name="Web \"beta\""
+platform="Web"
+export_path=""
+`), 0o644)
+	got, err := p.ExportPresets()
+	want := []ExportPreset{{Name: "Linux", Platform: "Linux", ExportPath: "build/game.x86_64"}, {Name: `Web "beta"`, Platform: "Web"}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("ExportPresets = %+v, %v; want %+v", got, err, want)
 	}
 }
 

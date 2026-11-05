@@ -49,13 +49,23 @@ func Load(dir string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(filepath.Join(abs, "project.godot"))
-	if err != nil {
+	p := &Project{Dir: abs, Autoloads: map[string]string{}, hiddenData: true}
+	if err := scanCfg(filepath.Join(abs, "project.godot"), p.apply); err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return p, nil
+}
 
-	p := &Project{Dir: abs, Autoloads: map[string]string{}, hiddenData: true}
+// scanCfg calls fn for every key in a Godot .cfg-style file, with its
+// section and unquoted value.
+// shortcut: a multi-line string value is read line by line; fine while only
+// single-line keys are wanted.
+func scanCfg(path string, fn func(section, key, val string)) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 	section := ""
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -64,13 +74,42 @@ func Load(dir string) (*Project, error) {
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = line[1 : len(line)-1]
 		} else if key, raw, ok := strings.Cut(line, "="); ok && !strings.HasPrefix(line, ";") {
-			p.apply(section, strings.TrimSpace(key), unquote(strings.TrimSpace(raw)))
+			fn(section, strings.TrimSpace(key), unquote(strings.TrimSpace(raw)))
 		}
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return sc.Err()
+}
+
+// ExportPreset is one [preset.N] section of export_presets.cfg.
+type ExportPreset struct {
+	Name       string `json:"name"`
+	Platform   string `json:"platform"`
+	ExportPath string `json:"export_path,omitempty"`
+}
+
+// ExportPresets reads export_presets.cfg, in file order. A missing file
+// gives an error that wraps os.ErrNotExist.
+func (p *Project) ExportPresets() ([]ExportPreset, error) {
+	var out []ExportPreset
+	last := ""
+	err := scanCfg(filepath.Join(p.Dir, "export_presets.cfg"), func(section, key, val string) {
+		// [preset.N] holds the preset itself; [preset.N.options] its options.
+		if n, ok := strings.CutPrefix(section, "preset."); !ok || strings.Contains(n, ".") {
+			return
+		}
+		if section != last {
+			out, last = append(out, ExportPreset{}), section
+		}
+		switch pr := &out[len(out)-1]; key {
+		case "name":
+			pr.Name = val
+		case "platform":
+			pr.Platform = val
+		case "export_path":
+			pr.ExportPath = val
+		}
+	})
+	return out, err
 }
 
 // apply records the project.godot settings the server uses.
