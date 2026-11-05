@@ -147,24 +147,33 @@ func (e Exec) CheckScripts(ctx context.Context, p *project.Project, scripts []st
 }
 
 // writeCheckInputs writes the checker and the list of scripts into a new
-// folder of their own, since several agent sessions may check scripts in the
-// same project at once. The caller removes dir.
+// folder of their own. The caller removes dir.
 func writeCheckInputs(p *project.Project, scripts []string) (dir, runnerRes, list string, err error) {
+	if dir, runnerRes, err = writeRunner(p, "check-", "check_scripts.gd", checkScript); err != nil {
+		return
+	}
+	// The list goes in a file: Windows caps a command line at 32k characters.
+	list = filepath.Join(dir, "check_list.txt")
+	if err = os.WriteFile(list, []byte(strings.Join(scripts, "\n")+"\n"), 0o644); err != nil {
+		os.RemoveAll(dir)
+	}
+	return
+}
+
+// writeRunner writes a helper script into a new folder of its own, since
+// several agent sessions may run helpers in the same project at once. The
+// caller removes dir.
+func writeRunner(p *project.Project, prefix, name string, src []byte) (dir, res string, err error) {
 	// Private like the plugin keeps it: bridge.json, with the token, lives here.
 	if err = os.MkdirAll(p.MCPDir(), 0o700); err != nil {
 		return
 	}
-	if dir, err = os.MkdirTemp(p.MCPDir(), "check-"); err != nil {
+	if dir, err = os.MkdirTemp(p.MCPDir(), prefix); err != nil {
 		return
 	}
-	runner := filepath.Join(dir, "check_scripts.gd")
-	// The list goes in a file: Windows caps a command line at 32k characters.
-	list = filepath.Join(dir, "check_list.txt")
-	if err = os.WriteFile(runner, checkScript, 0o644); err == nil {
-		err = os.WriteFile(list, []byte(strings.Join(scripts, "\n")+"\n"), 0o644)
-	}
-	if err == nil {
-		runnerRes, err = p.ToRes(runner)
+	path := filepath.Join(dir, name)
+	if err = os.WriteFile(path, src, 0o644); err == nil {
+		res, err = p.ToRes(path)
 	}
 	if err != nil {
 		os.RemoveAll(dir)
@@ -181,13 +190,8 @@ type loadedScript struct {
 // exactly the requested scripts.
 func readLoaded(lines, scripts []string) ([]loadedScript, error) {
 	var loaded []loadedScript
-	found := false
-	for _, l := range lines {
-		if rest, ok := strings.CutPrefix(CleanLine(l), resultMarker); ok {
-			found = json.Unmarshal([]byte(rest), &loaded) == nil
-		}
-	}
-	if !found {
+	rest, found := resultLine(lines)
+	if !found || json.Unmarshal([]byte(rest), &loaded) != nil {
 		return nil, errors.New("the script checker did not report a result")
 	}
 	reported := map[string]bool{}
@@ -273,6 +277,16 @@ func buildResult(loaded []loadedScript, byFile map[string][]Issue, other []Issue
 		res.Scripts = append(res.Scripts, sr)
 	}
 	return res
+}
+
+// resultLine is what follows the last result marker a helper script printed.
+func resultLine(lines []string) (string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if rest, ok := strings.CutPrefix(CleanLine(lines[i]), resultMarker); ok {
+			return rest, true
+		}
+	}
+	return "", false
 }
 
 func tail(s string, n int) string {
