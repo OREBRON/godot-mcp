@@ -24,6 +24,7 @@ var Version = "dev"
 const instructions = `Godot MCP drives a Godot 4 project.
 - Call project_info first: it shows the project, the Godot version and whether the editor plugin is connected.
 - Scripts: write .gd files with your own file tools, then run script_check. Godot exits with 0 even when a script is broken, so trust script_check, not an exit code.
+- APIs: class_info shows a class's real properties, methods and signals (built-in or class_name, no editor needed); check it instead of guessing names.
 - Scenes: edit through scene_* and node_* tools while the editor is open. They go through the editor's undo history, so the user can revert them with Ctrl+Z, and change nothing on disk until scene_save. To revert your own change, make the opposite change (node_delete what you added, set properties back). A property can take a new resource inline: {"shape": {"type": "RectangleShape2D", "size": [16, 16]}}.
 - Project settings and input actions: project_settings_get, project_settings_set and input_action_set change project.godot through the editor.
 - Do not edit a .tscn file by hand while the editor has it open; the editor's next save overwrites it.

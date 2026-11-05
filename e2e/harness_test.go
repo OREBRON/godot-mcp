@@ -12,9 +12,9 @@ import (
 	"github.com/orebron/godot-mcp/internal/godot"
 )
 
-// The harness and bridge compile inside the user's project, with its warning
-// settings, which may turn any warning into an error. They must compile with
-// every warning this Godot knows set to error.
+// The harness, the bridge and class_info's script compile inside the user's
+// project, with its warning settings, which may turn any warning into an
+// error. They must compile with every warning this Godot knows set to error.
 func TestHarnessUnderStrictWarnings(t *testing.T) {
 	g := findGodot(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -50,7 +50,12 @@ func _initialize() -> void:
 	if _, err := game.InstallHarness(runDir, "res://.godot/godot_mcp/run"); err != nil {
 		t.Fatal(err)
 	}
-	for _, script := range []string{"harness.gd", "bridge.gd"} {
+	classInfo, err := os.ReadFile(filepath.Join("..", "internal", "godot", "class_info.gd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(runDir, "class_info.gd"), string(classInfo))
+	for _, script := range []string{"harness.gd", "bridge.gd", "class_info.gd"} {
 		out, _ := g.Command(ctx, "--headless", "--path", proj, "--check-only", "--script", "res://.godot/godot_mcp/run/"+script).CombinedOutput()
 		for _, is := range godot.ParseIssues(strings.Split(string(out), "\n")) {
 			if is.Severity == "error" {

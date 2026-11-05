@@ -40,6 +40,12 @@ type scriptCheckIn struct {
 	IncludeAddons bool     `json:"include_addons,omitempty" jsonschema:"also check scripts under addons/ when paths is empty"`
 }
 
+type classInfoIn struct {
+	Class            string `json:"class" jsonschema:"a built-in class such as CharacterBody2D, or a class_name from the project's scripts"`
+	IncludeInherited bool   `json:"include_inherited,omitempty" jsonschema:"also list the members it inherits (default: only those the class declares itself)"`
+	Filter           string `json:"filter,omitempty" jsonschema:"keep only members whose name contains this, ignoring case"`
+}
+
 func (s *Server) addProjectTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "project_info",
@@ -68,6 +74,13 @@ func (s *Server) addProjectTools() {
 			"Success means the file was written by this run, not just exit code 0. The output must be inside the project; parent folders are created.",
 		Annotations: destructive,
 	}, s.exportBuild)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "class_info",
+		Description: "Look up the real API of a class before writing code against it: a built-in class or a class_name from the project's scripts, as the project's Godot sees it. " +
+			"Returns the inheritance chain and the properties (type, default), methods (signatures), signals, constants and enums the class declares itself; " +
+			"include_inherited adds what it inherits, and filter keeps the names containing a substring. Property setters and getters are not listed as methods. Works without the editor.",
+		Annotations: readOnly,
+	}, s.classInfo)
 }
 
 func (s *Server) projectInfo(ctx context.Context, _ *mcp.CallToolRequest, _ projectInfoIn) (*mcp.CallToolResult, any, error) {
@@ -131,6 +144,32 @@ func (s *Server) scriptCheck(ctx context.Context, _ *mcp.CallToolRequest, in scr
 		return nil, nil, err
 	}
 	r, err := jsonResult(checkSummary(res, notes))
+	return r, nil, err
+}
+
+func (s *Server) classInfo(ctx context.Context, _ *mcp.CallToolRequest, in classInfoIn) (*mcp.CallToolResult, any, error) {
+	p, err := s.project()
+	if err != nil {
+		return nil, nil, err
+	}
+	e, _, err := s.godotExec(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	notes := s.refreshClassCache(ctx, e, p)
+	info, err := e.ClassInfo(ctx, p, in.Class, in.IncludeInherited, in.Filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(notes) == 0 {
+		return textResult(info), nil, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(info, &out); err != nil {
+		return nil, nil, err
+	}
+	out["notes"] = notes
+	r, err := jsonResult(out)
 	return r, nil, err
 }
 
