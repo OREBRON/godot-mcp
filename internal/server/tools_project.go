@@ -3,12 +3,19 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/orebron/godot-mcp/internal/bridge"
 	"github.com/orebron/godot-mcp/internal/godot"
 	"github.com/orebron/godot-mcp/internal/project"
 )
@@ -19,6 +26,13 @@ type testRunIn struct {
 	Dirs           []string `json:"dirs,omitempty" jsonschema:"res:// folders of tests (default res://test or res://tests)"`
 	Framework      string   `json:"framework,omitempty" jsonschema:"\"auto\" (default: gdUnit4 if installed, else GUT), \"gdunit4\" or \"gut\""`
 	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty" jsonschema:"stop the run after this many seconds (default 300)"`
+}
+
+type exportBuildIn struct {
+	Preset         string   `json:"preset,omitempty" jsonschema:"name of a preset in export_presets.cfg; may be empty when there is only one"`
+	Output         string   `json:"output,omitempty" jsonschema:"res:// or project-relative path of the exported file (default: the preset's export path); must be inside the project"`
+	Debug          bool     `json:"debug,omitempty" jsonschema:"export a debug build (--export-debug) instead of a release build"`
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty" jsonschema:"stop the export after this many seconds (default 600)"`
 }
 
 type scriptCheckIn struct {
@@ -47,6 +61,13 @@ func (s *Server) addProjectTools() {
 			"Returns only the failing scripts, each with res:// file, line and message.",
 		Annotations: readOnly,
 	}, s.scriptCheck)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "export_build",
+		Description: "Export the game headless with a preset from export_presets.cfg (made under Project > Export in the editor). " +
+			"Returns the res:// output path, its size and the errors Godot printed, or why the export failed with the end of Godot's output. " +
+			"Success means the file was written by this run, not just exit code 0. The output must be inside the project; parent folders are created.",
+		Annotations: destructive,
+	}, s.exportBuild)
 }
 
 func (s *Server) projectInfo(ctx context.Context, _ *mcp.CallToolRequest, _ projectInfoIn) (*mcp.CallToolResult, any, error) {
@@ -182,11 +203,7 @@ func (s *Server) testRun(ctx context.Context, _ *mcp.CallToolRequest, in testRun
 	if err != nil {
 		return nil, nil, err
 	}
-	timeout := 300 * time.Second
-	if in.TimeoutSeconds != nil {
-		timeout = time.Duration(max(*in.TimeoutSeconds, 1) * float64(time.Second))
-	}
-	res, err := e.RunTests(ctx, p, framework, dirs, timeout)
+	res, err := e.RunTests(ctx, p, framework, dirs, seconds(in.TimeoutSeconds, 300*time.Second))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -211,4 +228,139 @@ func testDirs(p *project.Project, dirs []string) ([]string, error) {
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// seconds is a timeout_seconds parameter as a duration of at least one
+// second, or def when it is not given.
+func seconds(v *float64, def time.Duration) time.Duration {
+	if v == nil {
+		return def
+	}
+	return time.Duration(max(*v, 1) * float64(time.Second))
+}
+
+func (s *Server) exportBuild(ctx context.Context, _ *mcp.CallToolRequest, in exportBuildIn) (*mcp.CallToolResult, any, error) {
+	p, err := s.project()
+	if err != nil {
+		return nil, nil, err
+	}
+	e, _, err := s.godotExec(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	preset, err := pickPreset(p, in.Preset)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, out, err := exportTarget(p, preset, in.Output)
+	if err != nil {
+		return nil, nil, err
+	}
+	before, start := godot.OutputStat(out), time.Now()
+	run, err := e.Export(ctx, p, preset.Name, out, in.Debug, seconds(in.TimeoutSeconds, 600*time.Second))
+	if err != nil {
+		return nil, nil, err
+	}
+	if missing := godot.MissingTemplates(run.Output); len(missing) > 0 {
+		return nil, nil, templatesError(preset, missing)
+	}
+	summary := map[string]any{
+		"preset": preset.Name, "platform": preset.Platform, "debug": in.Debug, "output": res,
+		"exit_code": run.ExitCode, "duration_seconds": time.Since(start).Round(time.Millisecond).Seconds(),
+		"errors": run.Errors,
+	}
+	reportOutcome(summary, run, before, godot.OutputStat(out))
+	r, err := jsonResult(summary)
+	return r, nil, err
+}
+
+// reportOutcome adds ok and the size, or why the export failed: a written
+// file proves the export, the exit code alone does not.
+func reportOutcome(summary map[string]any, run godot.ExportRun, before, after godot.FileState) {
+	written := after.WrittenSince(before)
+	summary["ok"] = written && run.ExitCode == 0
+	switch {
+	case !written:
+		summary["reason"] = fmt.Sprintf("Godot wrote nothing at %s", summary["output"])
+	case run.ExitCode != 0:
+		summary["reason"] = fmt.Sprintf("Godot exited with %d", run.ExitCode)
+	default:
+		summary["size_bytes"] = after.Size
+		return
+	}
+	summary["output_tail"] = run.Tail
+}
+
+// pickPreset finds the named preset, or the only one when name is empty.
+func pickPreset(p *project.Project, name string) (project.ExportPreset, error) {
+	presets, err := p.ExportPresets()
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(presets) == 0) {
+		return project.ExportPreset{}, &bridge.Error{Code: "NO_EXPORT_PRESETS", Message: "the project has no export presets (export_presets.cfg)",
+			Hint: "add one in the editor under Project > Export, for the platform to build, then call export_build again"}
+	}
+	if err != nil {
+		return project.ExportPreset{}, err
+	}
+	names := make([]string, len(presets))
+	for i, pr := range presets {
+		if pr.Name == name || (name == "" && len(presets) == 1) {
+			return pr, nil
+		}
+		names[i] = strconv.Quote(pr.Name)
+	}
+	msg := fmt.Sprintf("no export preset named %q", name)
+	if name == "" {
+		msg = fmt.Sprintf("export_presets.cfg has %d presets; pass preset", len(presets))
+	}
+	return project.ExportPreset{}, &bridge.Error{Code: "PRESET_NOT_FOUND", Message: msg, Hint: "the presets are " + strings.Join(names, ", ")}
+}
+
+// exportTarget is where the export goes, as a res:// path and an OS path:
+// output, or else the preset's export path. It must be inside the project
+// and must not be a project file; its folder is created.
+func exportTarget(p *project.Project, preset project.ExportPreset, output string) (res, osPath string, err error) {
+	if output == "" {
+		output = preset.ExportPath
+	}
+	if output == "" {
+		return "", "", &bridge.Error{Code: "BAD_OUTPUT_PATH", Message: fmt.Sprintf("preset %q has no export path", preset.Name), Hint: "pass output, such as build/game.x86_64"}
+	}
+	res, err = p.ToRes(output)
+	if err == nil {
+		err = checkOutput(p, res)
+	}
+	if err == nil {
+		osPath, err = p.ToOS(res)
+	}
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(osPath), 0o755)
+	}
+	if err != nil {
+		return "", "", &bridge.Error{Code: "BAD_OUTPUT_PATH", Message: err.Error(), Hint: "pass output as a path inside the project folder, such as build/game.x86_64"}
+	}
+	return res, osPath, nil
+}
+
+// projectFiles are extensions an export must never overwrite.
+var projectFiles = []string{".gd", ".cs", ".tscn", ".scn", ".tres", ".res", ".godot", ".cfg", ".import", ".uid", ".gdshader"}
+
+func checkOutput(p *project.Project, res string) error {
+	if res == "res://" || strings.HasPrefix(res, "uid://") {
+		return fmt.Errorf("%s is not a file path", res)
+	}
+	if ext := strings.ToLower(path.Ext(res)); slices.Contains(projectFiles, ext) {
+		return fmt.Errorf("%s is a project file (%s); an export must not overwrite it", res, ext)
+	}
+	return p.CheckCaseExisting(res)
+}
+
+// templatesError says which export templates are missing and where they go.
+func templatesError(preset project.ExportPreset, missing []string) error {
+	dir := filepath.Dir(missing[0])
+	return &bridge.Error{
+		Code:    "EXPORT_TEMPLATES_MISSING",
+		Message: fmt.Sprintf("the export templates for preset %q (%s) are not installed: %s", preset.Name, preset.Platform, strings.Join(missing, ", ")),
+		Hint: fmt.Sprintf("install the %s export templates in the editor under Editor > Manage Export Templates > Download and Install; they go in %s. "+
+			"An export needs templates of exactly the editor's version.", filepath.Base(dir), dir),
+	}
 }
