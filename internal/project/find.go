@@ -483,7 +483,7 @@ func (s *scenes) nodes(res string) []sceneNode {
 	if s.f.known[res] { // an instance path read from a scene may lead anywhere
 		b, _ = os.ReadFile(s.p.osPath(res))
 	}
-	s.parsed[res] = parseScene(b)
+	s.parsed[res] = parseScene(b, s.f.ref)
 	return s.parsed[res]
 }
 
@@ -512,8 +512,18 @@ func (s *scenes) effective(n sceneNode, depth int) (typ, script string) {
 	return cmp.Or(n.typ, typ), cmp.Or(n.script, script)
 }
 
-// parseScene lists a scene's nodes, in file order (the root first).
-func parseScene(data []byte) []sceneNode {
+// ref is the file an ext_resource loads: by its uid when the project knows
+// it, as Godot does, so a moved file is still found; else by its path.
+func (f *files) ref(uid, path string) string {
+	if res, ok := f.uids[uid]; ok {
+		return res
+	}
+	return path
+}
+
+// parseScene lists a scene's nodes, in file order (the root first); ref
+// resolves an ext_resource's uid and path to a file.
+func parseScene(data []byte, ref func(uid, path string) string) []sceneNode {
 	ext := map[string]string{} // ext_resource id -> path
 	var nodes []sceneNode
 	inNode := false
@@ -521,7 +531,7 @@ func parseScene(data []byte) []sceneNode {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "[ext_resource "):
-			ext[attr(line, "id")] = attr(line, "path")
+			ext[attr(line, "id")] = ref(attr(line, "uid"), attr(line, "path"))
 		case strings.HasPrefix(line, "[node "):
 			nodes, inNode = append(nodes, newNode(line, i+1, ext)), true
 		case strings.HasPrefix(line, "["):

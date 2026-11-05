@@ -210,6 +210,22 @@ func TestFindStaysInProject(t *testing.T) {
 	}
 }
 
+// TestFindNodesAfterMove checks that a scene whose ext_resource paths are
+// stale after a move still counts, through the uids Godot loads it by.
+func TestFindNodesAfterMove(t *testing.T) {
+	p := findProject(t, map[string]string{
+		"project.godot":     "",
+		"chars/player.tscn": "[gd_scene format=3 uid=\"uid://pl\"]\n\n[ext_resource type=\"Script\" uid=\"uid://hero\" path=\"res://old/hero.gd\" id=\"1\"]\n\n[node name=\"Player\" type=\"Node2D\"]\nscript = ExtResource(\"1\")\n",
+		"chars/hero.gd":     "class_name Hero\nextends Node2D\n",
+		"chars/hero.gd.uid": "uid://hero\n",
+		"levels/level.tscn": "[gd_scene format=3]\n\n[ext_resource type=\"PackedScene\" uid=\"uid://pl\" path=\"res://old/player.tscn\" id=\"1\"]\n\n[node name=\"Level\" type=\"Node\"]\n\n[node name=\"P\" parent=\".\" instance=ExtResource(\"1\")]\n",
+	})
+	got, err := p.FindNodes("Hero")
+	if want := []string{"chars/player.tscn .", "levels/level.tscn P"}; err != nil || !slices.Equal(nodeLines(got.Nodes), want) {
+		t.Errorf("FindNodes(Hero) = %v, %v; want %v", nodeLines(got.Nodes), err, want)
+	}
+}
+
 func TestFindNodesCap(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node\"]\n")
