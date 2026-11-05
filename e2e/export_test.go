@@ -108,6 +108,11 @@ func TestExportBuild(t *testing.T) {
 	write(t, filepath.Join(s.proj, "art", "icon.png"), "png")
 	s.fails("export_build", map[string]any{"preset": "Linux", "output": "art/icon.png"}, "must not overwrite")
 	os.Remove(filepath.Join(s.proj, "art", "icon.png")) // not a real image; the next export would report it
+	// Libraries go beside the game, so a link there must not lead out.
+	os.MkdirAll(filepath.Join(s.proj, "linked"), 0o755)
+	if os.Symlink(t.TempDir(), filepath.Join(s.proj, "linked", "lib")) == nil {
+		s.fails("export_build", map[string]any{"preset": "Linux", "output": "linked/game.x86_64"}, "points outside the project")
+	}
 
 	r := s.ok("export_build", map[string]any{"preset": "Stand-in", "output": "res://build/sub/game.x86_64", "debug": true})
 	if r["ok"] != true || r["output"] != "res://build/sub/game.x86_64" || r["platform"] != "Linux" || r["size_bytes"] != 64.0 || r["exit_code"] != 0.0 || r["errors"] != nil {

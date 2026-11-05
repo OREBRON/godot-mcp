@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -427,10 +428,31 @@ func exportTarget(p *project.Project, preset project.ExportPreset, output string
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(osPath), 0o755)
 	}
+	if err == nil {
+		err = escapingLink(p, filepath.Dir(osPath))
+	}
 	if err != nil {
 		return "", "", &bridge.Error{Code: "BAD_OUTPUT_PATH", Message: err.Error(), Hint: "pass output as a path inside the project folder, such as build/game.x86_64"}
 	}
 	return res, osPath, nil
+}
+
+// escapingLink finds a link under dir, at any depth, that leads out of the
+// project: Godot writes an export's .pck and GDExtension libraries into
+// the output's folder and its subfolders, through any link there.
+func escapingLink(p *project.Project, dir string) error {
+	return filepath.WalkDir(dir, func(osPath string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return nil
+		case d.IsDir() && osPath == p.DataDir():
+			return filepath.SkipDir
+		case d.Type()&fs.ModeSymlink != 0:
+			_, err = p.ToRes(osPath)
+			return err
+		}
+		return nil
+	})
 }
 
 // projectFiles are extensions an export must never overwrite.
