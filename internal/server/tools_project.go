@@ -46,6 +46,11 @@ type classInfoIn struct {
 	Filter           string `json:"filter,omitempty" jsonschema:"keep only members whose name contains this, ignoring case"`
 }
 
+type projectFindIn struct {
+	Path     string `json:"path,omitempty" jsonschema:"a res:// or project-relative path, or a uid://: lists every project file that uses it"`
+	NodeType string `json:"node_type,omitempty" jsonschema:"a node class, built-in such as Area2D or a class_name: lists the scene nodes of that type"`
+}
+
 func (s *Server) addProjectTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "project_info",
@@ -81,6 +86,54 @@ func (s *Server) addProjectTools() {
 			"include_inherited adds what it inherits, and filter keeps the names containing a substring. Property setters and getters are not listed as methods. Works without the editor.",
 		Annotations: readOnly,
 	}, s.classInfo)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "project_find",
+		Description: "Before changing, moving or deleting something, see what depends on it. Pass exactly one of path and node_type. " +
+			"path (a file or uid://) returns its res:// path and uid and every line that uses it, with file, line and kind: " +
+			"ext_resource, setting or autoload in project.godot, preload, load, uid, string, or class (a class_name script named in other scripts). " +
+			"node_type returns the scene nodes of that exact type or with a class_name script of that name, with their node paths; " +
+			"an instanced scene counts by its root, and subclasses are not counted. " +
+			"Reads the project's text files, so it needs no editor; binary .scn/.res files are skipped and counted in notes. At most 200 hits, then truncated is true.",
+		Annotations: readOnly,
+	}, s.projectFind)
+}
+
+func (s *Server) projectFind(_ context.Context, _ *mcp.CallToolRequest, in projectFindIn) (*mcp.CallToolResult, any, error) {
+	p, err := s.project()
+	if err != nil {
+		return nil, nil, err
+	}
+	var out any
+	switch {
+	case (in.Path == "") == (in.NodeType == ""):
+		return nil, nil, &bridge.Error{Code: "BAD_ARGUMENTS", Message: "pass exactly one of path and node_type", Hint: "call project_find once for each question"}
+	case in.Path != "":
+		out, err = p.FindRefs(in.Path)
+	default:
+		out, err = p.FindNodes(in.NodeType)
+	}
+	if err != nil {
+		return nil, nil, findError(err)
+	}
+	r, err := jsonResult(out)
+	return r, nil, err
+}
+
+// findError turns a path or uid that names no file into a coded error with
+// the close names.
+func findError(err error) error {
+	var m *project.MissingError
+	if !errors.As(err, &m) {
+		return err
+	}
+	code, hint := "FILE_NOT_FOUND", "check the path; it is relative to the project folder"
+	if strings.HasPrefix(m.Target, "uid://") {
+		code, hint = "UID_NOT_FOUND", "check the uid, or pass the file's res:// path"
+	}
+	if len(m.Similar) > 0 {
+		hint = "did you mean: " + strings.Join(m.Similar, ", ")
+	}
+	return &bridge.Error{Code: code, Message: m.Error(), Hint: hint}
 }
 
 func (s *Server) projectInfo(ctx context.Context, _ *mcp.CallToolRequest, _ projectInfoIn) (*mcp.CallToolResult, any, error) {

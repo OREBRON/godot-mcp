@@ -33,17 +33,17 @@ func toolNames(t *testing.T, groups []string) []string {
 }
 
 func TestToolGroups(t *testing.T) {
-	if all := toolNames(t, nil); len(all) != 32 {
-		t.Errorf("no groups gave %d tools, want all 32", len(all))
+	if all := toolNames(t, nil); len(all) != 33 {
+		t.Errorf("no groups gave %d tools, want all 33", len(all))
 	}
 	some := toolNames(t, []string{"project", "game"})
 	for _, n := range some {
-		if !strings.HasPrefix(n, "game_") && !slices.Contains([]string{"project_info", "script_check", "test_run", "export_build", "class_info"}, n) {
+		if !strings.HasPrefix(n, "game_") && !slices.Contains([]string{"project_info", "script_check", "test_run", "export_build", "class_info", "project_find"}, n) {
 			t.Errorf("project,game includes %s", n)
 		}
 	}
-	if len(some) != 16 {
-		t.Errorf("project,game gave %d tools, want 16: %v", len(some), some)
+	if len(some) != 17 {
+		t.Errorf("project,game gave %d tools, want 17: %v", len(some), some)
 	}
 	if err := CheckToolGroups([]string{"game", "nodes"}); err == nil || !strings.Contains(err.Error(), `"nodes"`) {
 		t.Errorf("CheckToolGroups(nodes) = %v", err)

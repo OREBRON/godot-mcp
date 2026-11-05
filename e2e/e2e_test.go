@@ -219,8 +219,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 32 {
-		t.Errorf("got %d tools, want 32", len(tools.Tools))
+	if len(tools.Tools) != 33 {
+		t.Errorf("got %d tools, want 33", len(tools.Tools))
 	}
 
 	info := ok("project_info", nil)
