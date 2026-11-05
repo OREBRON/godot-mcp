@@ -440,10 +440,43 @@ func checkOutput(p *project.Project, res string) error {
 	if res == "res://" || strings.HasPrefix(res, "uid://") {
 		return fmt.Errorf("%s is not a file path", res)
 	}
-	if ext := strings.ToLower(path.Ext(res)); slices.Contains(projectFiles, ext) {
+	ext := strings.ToLower(path.Ext(res))
+	if slices.Contains(projectFiles, ext) {
 		return fmt.Errorf("%s is a project file (%s); an export must not overwrite it", res, ext)
 	}
-	return p.CheckCaseExisting(res)
+	if err := p.CheckCaseExisting(res); err != nil {
+		return err
+	}
+	osPath, err := p.ToOS(res)
+	if err != nil {
+		return err
+	}
+	if isAsset(osPath, ext) {
+		return fmt.Errorf("%s already exists and is not an export; an export must not overwrite it", res)
+	}
+	return nil
+}
+
+// exportExts are what exports write. An existing file may be replaced only
+// when it has one of these and Godot has not imported it.
+// shortcut: an existing extensionless file (a Linux or macOS binary) may be
+// replaced even if it is not an export, such as LICENSE; tighten this if
+// agents aim exports at the project root.
+var exportExts = []string{"", ".x86_64", ".x86_32", ".arm64", ".arm32", ".rv64", ".exe", ".pck", ".zip",
+	".apk", ".aab", ".app", ".dmg", ".ipa", ".html", ".wasm", ".js", ".so", ".dll", ".dylib"}
+
+// isAsset reports whether osPath exists and looks like a project asset
+// rather than an earlier export.
+func isAsset(osPath, ext string) bool {
+	if _, err := os.Stat(osPath); err != nil {
+		return false
+	}
+	return !slices.Contains(exportExts, ext) || fileExists(osPath+".import") || fileExists(osPath+".uid")
+}
+
+func fileExists(osPath string) bool {
+	_, err := os.Stat(osPath)
+	return err == nil
 }
 
 // templatesError says which export templates are missing and where they go.

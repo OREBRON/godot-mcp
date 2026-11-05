@@ -105,6 +105,9 @@ func TestExportBuild(t *testing.T) {
 	s.fails("export_build", map[string]any{"preset": "Linux", "output": "../game.x86_64"}, "outside the project")
 	s.fails("export_build", map[string]any{"preset": "Linux", "output": `build\..\..\game.x86_64`}, "outside the project")
 	s.fails("export_build", map[string]any{"preset": "Linux", "output": "demo/main.tscn"}, "must not overwrite")
+	write(t, filepath.Join(s.proj, "art", "icon.png"), "png")
+	s.fails("export_build", map[string]any{"preset": "Linux", "output": "art/icon.png"}, "must not overwrite")
+	os.Remove(filepath.Join(s.proj, "art", "icon.png")) // not a real image; the next export would report it
 
 	r := s.ok("export_build", map[string]any{"preset": "Stand-in", "output": "res://build/sub/game.x86_64", "debug": true})
 	if r["ok"] != true || r["output"] != "res://build/sub/game.x86_64" || r["platform"] != "Linux" || r["size_bytes"] != 64.0 || r["exit_code"] != 0.0 || r["errors"] != nil {
