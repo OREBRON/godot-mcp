@@ -26,7 +26,7 @@ func TestProjectFind(t *testing.T) {
 		`"references":[{"file":"res://demo/main.tscn","kind":"ext_resource","line":4,`, `"truncated":false`)
 	check(map[string]any{"path": "demo/item_data.gd"},
 		`"class_name":"ItemData"`, `{"file":"res://demo/player.gd","kind":"class","line":7,"text":"@export var weapon: ItemData"}`)
-	check(map[string]any{"path": "res://demo/main.tscn"}, `{"file":"res://project.godot","kind":"setting","line":9,`)
+	check(map[string]any{"path": "res://demo/main.tscn"}, `{"file":"res://project.godot","kind":"setting",`, `"text":"run/main_scene=\"res://demo/main.tscn\""`)
 
 	// The import gave the script a uid; it leads back to the file.
 	uid, _ := check(map[string]any{"path": "res://demo/player.gd"}, `"uid":"uid://`, `"file":"res://demo/player.tscn","kind":"ext_resource"`)["uid"].(string)
