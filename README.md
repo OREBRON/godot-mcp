@@ -46,9 +46,9 @@ The plugin is the listener, so several agent sessions can share one open editor.
 
    It prints a ready-to-paste `.mcp.json` block and a `claude mcp add` command. Both use absolute paths, which avoids the usual problems: GUI apps that don't see the shell's `PATH`, and the `cmd /c npx` workaround needed on Windows.
 
-Without the editor open, `project_info`, `script_check`, `class_info`, `test_run`, `export_build` and the `game_*` tools still work.
+Without the editor open, `project_info`, `script_check`, `class_info`, `project_find`, `test_run`, `export_build` and the `game_*` tools still work.
 
-To offer the agent fewer tools, pass `--tools` with a comma-separated list of groups, or set `GODOT_MCP_TOOLS`. The groups are `project` (`project_info`, `script_check`, `class_info`, `test_run`, `export_build`), `game`, `scene` (scenes, `resource_save`, `editor_screenshot`), `node` and `settings` (project settings and input actions). For example, `--tools project,game` keeps only the tools that need no editor. `godot-mcp config --tools ...` writes the flag into the configuration it prints.
+To offer the agent fewer tools, pass `--tools` with a comma-separated list of groups, or set `GODOT_MCP_TOOLS`. The groups are `project` (`project_info`, `script_check`, `class_info`, `project_find`, `test_run`, `export_build`), `game`, `scene` (scenes, `resource_save`, `editor_screenshot`), `node` and `settings` (project settings and input actions). For example, `--tools project,game` keeps only the tools that need no editor. `godot-mcp config --tools ...` writes the flag into the configuration it prints.
 
 ### Finding Godot
 
@@ -71,6 +71,7 @@ On macOS, `GODOT_PATH` and `--godot` can point at the `.app` bundle itself.
 | `project_info` | no | Project, Godot version, editor connection and game status. Call it first. |
 | `script_check` | no | Parses `.gd` files with the real Godot, so autoloads and `class_name` globals resolve. Returns file, line and message for each failure. |
 | `class_info` | no | A class's real API, built-in or `class_name`: inheritance chain, properties with types and defaults, method signatures, signals, constants and enums. Its own members by default; `include_inherited` adds the rest, `filter` narrows by name. |
+| `project_find` | no | What depends on a file or uid: every line that uses it, with file, line and kind (`ext_resource`, project setting or autoload, `preload`/`load`, uid, or a `class_name` used in other scripts). Or, for a `node_type`, the scene nodes of that type or `class_name` with their node paths; an instanced scene counts by its root. Scans text files only and stops at 200 hits. |
 | `test_run` | no | Runs the project's gdUnit4 or GUT tests headless; returns counts and each failing test, read from the JUnit report. |
 | `export_build` | no | Exports the game headless with a preset from `export_presets.cfg` to a path inside the project. Succeeds only when the file was written by this run, whatever the exit code; missing export templates are named with the folder they go in. |
 | `game_run` | no | Runs the project or one scene, optionally headless. Returns the first output and parsed errors. |
