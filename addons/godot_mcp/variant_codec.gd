@@ -342,8 +342,21 @@ static func check_res_path(path: String) -> String:
 				if n.to_lower() == part.to_lower():
 					return "%s has the wrong letter case: on disk it is spelled \"%s\"; Linux and exported games are case-sensitive" % [path, n]
 			return "" # missing; the loader reports that
+		if d.is_link(part) and not _inside_project(dir, d.read_link(part)):
+			return "%s goes through %s, a link that leads out of the project" % [path, dir.path_join(part)]
 		dir = dir.path_join(part)
 	return ""
+
+
+## Whether a link in folder dir to target stays inside the project.
+## shortcut: a link whose target is itself a link is judged by the first
+## target only; resolve the chain if such setups turn up.
+static func _inside_project(dir: String, target: String) -> bool:
+	if target.is_relative_path():
+		target = ProjectSettings.globalize_path(dir).path_join(target)
+	var root := ProjectSettings.globalize_path("res://").simplify_path()
+	target = target.simplify_path()
+	return target == root or target.begins_with(root.trim_suffix("/") + "/")
 
 
 static func _color(value: Variant) -> Variant:
