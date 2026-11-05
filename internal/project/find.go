@@ -71,7 +71,7 @@ type files struct {
 	binary int               // .scn and .res files, which cannot be scanned
 }
 
-var textExts = []string{".tscn", ".tres", ".gd", ".gdshader", ".gdshaderinc"}
+var textExts = []string{".tscn", ".tres", ".gd", ".cs", ".gdshader", ".gdshaderinc", ".gdextension"}
 
 // walk lists the project's files, skipping the data folder, hidden folders
 // and folders holding .gdignore, as Godot does.
@@ -211,22 +211,25 @@ func (p *Project) FindRefs(target string) (*Refs, error) {
 		b, _ := os.ReadFile(p.osPath(res))
 		out.ClassName = className(b)
 	}
-	needles := []string{res}
+	needles := []needle{{text: res}}
 	if out.UID != "" {
-		needles = append(needles, out.UID)
+		needles = append(needles, needle{text: out.UID, byUID: true})
 	}
 	for _, file := range f.text {
 		if file == res {
 			continue
 		}
 		if b, err := os.ReadFile(p.osPath(file)); err == nil {
-			out.References = append(out.References, scanRefs(file, b, needles, out.ClassName)...)
+			out.References = append(out.References, scanRefs(file, b, append(needles, relative(file, res)...), out.ClassName)...)
 		}
 		if len(out.References) > FindLimit {
 			break
 		}
 	}
 	out.References, out.Truncated = capped(out.References)
+	if len(out.References) == 0 {
+		out.Notes = append(out.Notes, "no file names it, but a path built at runtime (joined strings, paths read from data) is not found; check before deleting")
+	}
 	return out, nil
 }
 
@@ -297,11 +300,35 @@ func similarity(a, b string) float64 {
 	return 2 * float64(common) / float64(len(a)+len(b)-2)
 }
 
-// scanRefs lists the lines of file that hold one of needles (a res:// path
-// and its uid) as a whole string, or, in a script, class as an identifier.
-// shortcut: paths relative to a script's folder are not matched; add them
-// if agents meet such preloads.
-func scanRefs(file string, data []byte, needles []string, class string) []Ref {
+// needle is a way a file can name the path FindRefs looks for.
+type needle struct {
+	text     string
+	byUID    bool
+	loadOnly bool // a relative path counts only inside load() or preload()
+}
+
+// relative is res as a script in file may name it, relative to the
+// script's folder: "player.tscn", "./player.tscn" or "../x/player.tscn".
+func relative(file, res string) []needle {
+	if !hasExt(file, ".gd") {
+		return nil
+	}
+	dir := path.Dir(strings.TrimPrefix(file, "res://"))
+	rel, err := filepath.Rel(filepath.FromSlash(dir), filepath.FromSlash(strings.TrimPrefix(res, "res://")))
+	if err != nil {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	out := []needle{{text: rel, loadOnly: true}}
+	if !strings.HasPrefix(rel, "../") {
+		out = append(out, needle{text: "./" + rel, loadOnly: true})
+	}
+	return out
+}
+
+// scanRefs lists the lines of file that hold one of needles as a whole
+// string, or, in a script, class as an identifier.
+func scanRefs(file string, data []byte, needles []needle, class string) []Ref {
 	var refs []Ref
 	section := ""
 	for i, line := range strings.Split(string(data), "\n") {
@@ -310,8 +337,8 @@ func scanRefs(file string, data []byte, needles []string, class string) []Ref {
 			section = line[1 : len(line)-1]
 		}
 		kind := ""
-		if n := slices.IndexFunc(needles, func(s string) bool { return occurs(line, s, quotedAt(line)) }); n >= 0 {
-			kind = refKind(file, section, line, n > 0)
+		if n := slices.IndexFunc(needles, func(nd needle) bool { return names(line, nd) }); n >= 0 {
+			kind = refKind(file, section, line, needles[n].byUID)
 		} else if class != "" && hasExt(file, ".gd") && !strings.HasPrefix(line, "#") && occurs(line, class, wordAt(line)) {
 			kind = "class"
 		}
@@ -320,6 +347,10 @@ func scanRefs(file string, data []byte, needles []string, class string) []Ref {
 		}
 	}
 	return refs
+}
+
+func names(line string, nd needle) bool {
+	return (!nd.loadOnly || strings.Contains(line, "load(")) && occurs(line, nd.text, quotedAt(line))
 }
 
 // refKind says how a line that holds a path uses it.

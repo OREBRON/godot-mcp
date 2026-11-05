@@ -65,6 +65,9 @@ var heroes: HeroList
 var other = "res://scenes/player.tscn.bak"
 `,
 	"addons/tool/use.gd":    "var s = load('res://scenes/player.tscn')\n",
+	"scenes/spawner.gd":     "const P = preload(\"player.tscn\")\nvar q = load(\"./player.tscn\")\nvar label = \"player.tscn\"\n",
+	"scripts/Spawn.cs":      "var s = GD.Load<PackedScene>(\"res://scenes/player.tscn\");\nvar r = \"../scenes/player.tscn\";\n",
+	"scripts/up.gd":         "var u = load(\"../scenes/player.tscn\")\n",
 	"ignored/.gdignore":     "",
 	"ignored/use.gd":        "var s = load(\"res://scenes/player.tscn\")\n",
 	".godot/cache.tres":     "path = \"res://scenes/player.tscn\"\n",
@@ -89,7 +92,9 @@ func TestFindRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"addons/tool/use.gd:1 load", "materials/glow.tres:4 string", "scenes/main.tscn:3 ext_resource", "scripts/game.gd:3 preload", "scripts/game.gd:4 load"}
+	// Scripts may name it relative to their folder; C# files count too.
+	want := []string{"addons/tool/use.gd:1 load", "materials/glow.tres:4 string", "scenes/main.tscn:3 ext_resource",
+		"scenes/spawner.gd:1 preload", "scenes/spawner.gd:2 load", "scripts/Spawn.cs:1 string", "scripts/game.gd:3 preload", "scripts/game.gd:4 load", "scripts/up.gd:1 load"}
 	if got.Path != "res://scenes/player.tscn" || got.UID != "uid://pl" || !slices.Equal(refLines(got.References), want) || got.Truncated {
 		t.Errorf("FindRefs(player.tscn) = %+v, refs %v, want %v", got, refLines(got.References), want)
 	}
@@ -110,6 +115,10 @@ func TestFindRefs(t *testing.T) {
 	got, err = p.FindRefs("res://scripts/game.gd")
 	if err != nil || !slices.Equal(refLines(got.References), []string{"project.godot:7 autoload"}) {
 		t.Errorf("FindRefs(game.gd) = %v, %v", refLines(got.References), err)
+	}
+	// An empty answer says what it cannot see.
+	if got, err := p.FindRefs("res://scripts/up.gd"); err != nil || len(got.References) != 0 || !strings.Contains(strings.Join(got.Notes, " "), "runtime") {
+		t.Errorf("FindRefs(up.gd) = %+v, %v; want no references and a note", got, err)
 	}
 	got, err = p.FindRefs("res://scenes/main.tscn")
 	if err != nil || !slices.Equal(refLines(got.References), []string{"project.godot:3 setting", "scenes/inherited.tscn:3 ext_resource"}) {

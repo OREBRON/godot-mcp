@@ -90,11 +90,12 @@ func (s *Server) addProjectTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "project_find",
 		Description: "Before changing, moving or deleting something, see what depends on it. Pass exactly one of path and node_type. " +
-			"path (a file or uid://) returns its res:// path and uid and every line that uses it, with file, line and kind: " +
+			"path (a file or uid://) returns its res:// path and uid and the lines that name it in scenes, resources, scripts (.gd, also relative to the script's folder, and .cs), shaders, .gdextension files and project.godot, with file, line and kind: " +
 			"ext_resource, setting or autoload in project.godot, preload, load, uid, string, or class (a class_name script named in other scripts). " +
 			"node_type returns the scene nodes of that exact type or with a class_name script of that name, with their node paths; " +
 			"an instanced scene counts by its root, and subclasses are not counted. " +
-			"Reads the project's text files, so it needs no editor; binary .scn/.res files are skipped and counted in notes. At most 200 hits, then truncated is true.",
+			"Reads the project's text files, so it needs no editor; binary .scn/.res files are skipped and counted in notes. " +
+			"A path built at runtime is not found, so no references does not prove a file is unused. At most 200 hits, then truncated is true.",
 		Annotations: readOnly,
 	}, s.projectFind)
 }
