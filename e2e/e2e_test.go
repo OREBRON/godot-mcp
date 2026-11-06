@@ -66,6 +66,15 @@ func findGodot(t *testing.T) godot.Exec {
 func start(t *testing.T, headless bool) *session {
 	t.Helper()
 	s := newSession(t)
+	s.openEditor(headless)
+	return s
+}
+
+// openEditor starts an editor on the session's project, waits for the plugin
+// and connects a server to it.
+func (s *session) openEditor(headless bool) {
+	t := s.t
+	t.Helper()
 	args := []string{"-e", "--path", s.proj}
 	if headless {
 		args = append([]string{"--headless"}, args...)
@@ -87,7 +96,6 @@ func start(t *testing.T, headless bool) *session {
 	waitFor(t, filepath.Join(s.proj, ".godot", "godot_mcp", "bridge.json"), time.Minute)
 	s.editorLog = editorLog.Name()
 	s.cs, s.server = s.connect()
-	return s
 }
 
 // newSession copies the demo project, imports it and builds the binary,
