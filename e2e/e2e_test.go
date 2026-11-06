@@ -412,6 +412,12 @@ func TestEndToEnd(t *testing.T) {
 	ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "take_hit"}) // again: no-op
 	fails("node_signal_connect", map[string]any{"from": "Hero", "signal": "explode", "to": "Player", "method": "take_hit"}, "SIGNAL_NOT_FOUND")
 	fails("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "fly"}, "METHOD_NOT_FOUND")
+	// A method added with file tools behind the editor's back counts at once.
+	playerGD := filepath.Join(proj, "demo", "player.gd")
+	src, _ := os.ReadFile(playerGD)
+	write(t, playerGD, string(src)+"\n\nfunc fly() -> void:\n\tpass\n")
+	ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "fly"})
+	ok("node_signal_connect", map[string]any{"from": "Hero", "signal": "visibility_changed", "to": "Player", "method": "fly", "disconnect": true})
 
 	ok("scene_save", nil)
 	saved, err := os.ReadFile(filepath.Join(proj, "levels", "test_level.tscn"))

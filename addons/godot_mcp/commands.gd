@@ -615,7 +615,10 @@ func _check_connection(from: Node, sig: String, to: Node, method: String) -> Var
 	if not _has_method(to, method):
 		var script: Script = to.get_script()
 		var where := script.resource_path if script != null else "a script attached to it"
-		return _fail("METHOD_NOT_FOUND", "\"%s\" has no method %s" % [_rel(to), method], "add func %s() to %s first, then run script_check" % [method, where])
+		var hint := "add func %s() to %s first, then run script_check" % [method, where]
+		if script != null and _open_in_script_editor(script) and _changed_on_disk(script):
+			hint = "%s is open in the script editor, which holds its own copy; ask the user to reload it from disk there" % where
+		return _fail("METHOD_NOT_FOUND", "\"%s\" has no method %s" % [_rel(to), method], hint)
 	return null
 
 
@@ -625,10 +628,32 @@ func _has_method(node: Node, method: String) -> bool:
 		return true
 	var script: Script = node.get_script()
 	while script != null:
+		_reload_if_changed(script)
 		if script.get_script_method_list().any(func(m: Dictionary) -> bool: return m.name == method):
 			return true
 		script = script.get_base_script()
 	return false
+
+
+## Agents edit scripts with their own file tools, and the editor rereads a
+## changed script only when its window gets focus. Reload it as the editor
+## would, unless the script editor has it open: that copy may hold the
+## user's unsaved changes.
+func _reload_if_changed(script: Script) -> void:
+	if _changed_on_disk(script) and not _open_in_script_editor(script):
+		script.source_code = FileAccess.get_file_as_string(script.resource_path)
+		script.reload(true)
+
+
+func _changed_on_disk(script: Script) -> bool:
+	var path := script.resource_path
+	if not path.ends_with(".gd") or not FileAccess.file_exists(path):
+		return false # built-in scripts live in their scene
+	return FileAccess.get_file_as_string(path) != script.source_code
+
+
+func _open_in_script_editor(script: Script) -> bool:
+	return EditorInterface.get_script_editor().get_open_scripts().has(script)
 
 
 ## Connects or disconnects as one undoable action. CONNECT_PERSIST makes the
