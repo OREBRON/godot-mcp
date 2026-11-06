@@ -129,6 +129,26 @@ go test ./e2e/                                          # real binary + headless
 GODOT_MCP_E2E_WINDOWED=1 go test ./e2e/ -run Screenshot # opens an editor window and a game window
 ```
 
+### Agent evaluations
+
+`TestAgentEval` measures whether a real agent gets real tasks done with only this server, and where the tools confuse it. Each task gets a fresh copy of the demo project and a headless editor, then the Claude Code CLI (`claude -p`) works on a request written the way a user would write it, with the `godot` server and the file tools only. A grader then checks the project files or the agent's answer; no model judges the result. Before grading, the test saves the scene open in the editor, as the user's next Ctrl+S would, so a scene file changed on disk behind the editor's back counts only if the editor keeps the change. The tasks are in [`e2e/eval_tasks_test.go`](e2e/eval_tasks_test.go): fixing a broken script, adding nodes and resources, input actions, project settings, signals, renaming a node, finding a file's dependents, and reading or stepping the running game.
+
+The evaluations spend API money, so they are skipped unless `GODOT_MCP_EVAL=1`:
+
+```bash
+GODOT_MCP_EVAL=1 go test -v -timeout 0 -run TestAgentEval ./e2e/            # every task
+GODOT_MCP_EVAL=1 go test -v -timeout 0 -run TestAgentEval/add_coin ./e2e/   # one task
+```
+
+| Variable | Default | |
+|---|---|---|
+| `GODOT_MCP_EVAL_MODEL` | `sonnet` | the `--model` the agent runs with |
+| `GODOT_MCP_EVAL_BUDGET_USD` | `1` | spending cap per task (`--max-budget-usd`) |
+| `GODOT_MCP_EVAL_TIMEOUT` | `10m` | time limit per task |
+| `GODOT_MCP_EVAL_OUT` | a new temporary folder | where the results go |
+
+The agent runs with `--setting-sources ""`, so your own hooks, plugins and `CLAUDE.md` stay out of it while your Claude Code login still works. The results folder gets each task's stream-json transcript (`<task>.jsonl`) and `summary.md`: pass or fail with the grader's reasons, turns, tool calls by name, the tool calls that failed with their error text, cost and duration. The test prints the summary too. A game the agent runs may open a window.
+
 The repository root is also a Godot project (`project.godot`, `demo/`) for working on the plugin. Go folders carry `.gdignore`, so the Godot editor skips them. The `export-ignore` rules in `.gitattributes` keep everything except `addons/godot_mcp/` out of Asset Library downloads.
 
 Pushing a `v*` tag builds the six binaries with GoReleaser and attaches them, along with the plugin zip, to a GitHub release. Before tagging, update the plugin version in both `plugin.cfg` and `plugin.gd`.
