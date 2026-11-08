@@ -223,7 +223,8 @@ func (s *Server) addGameControlTools() {
 		Name: "game_screenshot",
 		Description: "Capture the current frame of the game started by game_run, to see what the player sees. " +
 			"Needs a game started without headless. Also reports logical_width and logical_height, the coordinate space " +
-			"game_input positions use; on a HiDPI screen the image has more pixels than that.",
+			"game_input positions use; on a HiDPI screen the image has more pixels than that. " +
+			"stale true means the window drew nothing for 5 seconds (behind other windows or minimised), so the image is its last frame.",
 		Annotations: readOnly,
 	}, s.gameScreenshot)
 }

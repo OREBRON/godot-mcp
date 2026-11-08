@@ -132,8 +132,9 @@ func (s *Server) addSceneTools() {
 		Annotations: editorEdit,
 	}, "resource_save", 30*time.Second, "path")
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "editor_screenshot",
-		Description: "Capture the editor's 2D or 3D viewport as an image, to check layout and visuals of the edited scene. Not available when the editor runs headless.",
+		Name: "editor_screenshot",
+		Description: "Capture the editor's 2D or 3D viewport as an image, to check layout and visuals of the edited scene. Not available when the editor runs headless. " +
+			"stale true means the editor window drew nothing for 5 seconds (behind other windows or minimised), so the image is its last frame.",
 		Annotations: readOnly,
 	}, s.editorScreenshot)
 }

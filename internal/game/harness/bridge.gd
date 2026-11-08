@@ -638,13 +638,13 @@ func _drawn() -> bool:
 func _screenshot(params: Dictionary) -> Variant:
 	if DisplayServer.get_name() == "headless":
 		return _fail("NOT_AVAILABLE_HEADLESS", "the game runs headless and draws nothing", "stop it and start it again with game_run without headless")
+	# A window behind others or minimised draws nothing; its last frame is
+	# still worth seeing, marked stale.
 	var drawn: bool = await _drawn()
-	if not drawn:
-		return _fail("NOT_DRAWING", "the game window drew no frame within %d ms" % DRAW_TIMEOUT_MS, "bring the game window to the front; a minimised or hidden window draws nothing")
 	var vp: Viewport = get_viewport()
 	var img: Image = vp.get_texture().get_image()
 	if img == null or img.is_empty():
-		return _fail("CAPTURE_FAILED", "the game's viewport returned no image", "make sure the game window is not minimised")
+		return _fail("NOT_DRAWING", "the game window has drawn no frame", "bring the game window to the front; a minimised or hidden window draws nothing")
 	var logical: Vector2 = vp.get_visible_rect().size
 	var max_width: int = _int_param(params, "max_width", 1280)
 	if max_width <= 0:
@@ -659,6 +659,7 @@ func _screenshot(params: Dictionary) -> Variant:
 		"logical_width": logical.x,
 		"logical_height": logical.y,
 		"paused": get_tree().paused,
+		"stale": not drawn,
 	}
 
 

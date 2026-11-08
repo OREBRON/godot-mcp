@@ -815,12 +815,13 @@ func _editor_screenshot(p: Dictionary) -> Dictionary:
 	# A viewport only renders while its main screen is shown.
 	EditorInterface.set_main_screen_editor("3D" if which == "3d" else "2D")
 	await _frames(2)
-	if not await _drawn():
-		return _fail("NOT_DRAWING", "the editor window drew no frame within %d ms" % DRAW_TIMEOUT_MS, "bring the editor window to the front; a minimised or hidden window draws nothing")
+	# A window behind others or minimised draws nothing; its last frame is
+	# still worth seeing, marked stale.
+	var drawn: bool = await _drawn()
 	var vp: SubViewport = EditorInterface.get_editor_viewport_3d(0) if which == "3d" else EditorInterface.get_editor_viewport_2d()
 	var img := vp.get_texture().get_image()
 	if img == null or img.is_empty():
-		return _fail("CAPTURE_FAILED", "the %s viewport returned no image" % which, "make sure the editor window is not minimised")
+		return _fail("NOT_DRAWING", "the %s viewport has drawn no frame" % which, "bring the editor window to the front; a minimised or hidden window draws nothing")
 	var max_width := int(p.get("max_width", 1280))
 	if max_width <= 0:
 		max_width = 1280
@@ -831,4 +832,5 @@ func _editor_screenshot(p: Dictionary) -> Dictionary:
 		"width": img.get_width(),
 		"height": img.get_height(),
 		"viewport": which,
+		"stale": not drawn,
 	}
